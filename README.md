@@ -13,8 +13,11 @@
 以下为修改、推送流程
 
 ```
-# 拉取远程更新内容，每次本地修改前需运行
-git pull
+# 新建分支
+git switch -c <分支名>
+
+# 拉取远程更新内容
+git pull origin main
 
 # 将本地修改添加至缓冲区
 git add .
@@ -23,7 +26,13 @@ git add .
 git commit -m "提交说明"
 
 # 将本地修改提交至云端
-git push
+git push origin <分支名>
+
+# （合并分支后）删除本地分支
+git branch -d <分支名>
+
+# 删除远程分支
+git push origin :<分支名>
 ```
 
 ### 使用 UV 进行包管理
