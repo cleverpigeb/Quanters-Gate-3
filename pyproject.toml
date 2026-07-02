@@ -1,0 +1,11 @@
+[project]
+name = "Quanters-Gate-3"
+version = "0.1.0"
+description = "一个简单的量化交易实战"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "akshare>=1.18.64",
+    "matplotlib>=3.11.0",
+    "pandas>=3.0.3",
+]
