@@ -29,6 +29,7 @@ git commit -m "提交说明"
 git push origin <分支名>
 
 # （合并分支后）删除本地分支
+git switch main
 git branch -d <分支名>
 
 # 删除远程分支
