@@ -24,7 +24,7 @@ def main():
     data.loc[data["MA5"] > data["MA20"], "Signal"] = 1
 
     # 根据交易策略实施持仓情况
-    data["Position"] = data["Signal"].shift(1).fillna(0)
+    data["Position"] = data["Signal"].shift(1, fill_value=0)
 
     data["Market_Return"] = data["close"].pct_change()
 
@@ -50,9 +50,9 @@ def main():
 
     # 标记买入和卖出信号
     data["Buy"] = (1 == data["Signal"]) & \
-        (0 == data["Signal"].shift(1).fillna(0))
+        (0 == data["Signal"].shift(1, fill_value=0))
     data["Sell"] = (0 == data["Signal"]) & \
-        (1 == data["Signal"].shift(1).fillna(0))
+        (1 == data["Signal"].shift(1, fill_value=0))
 
     # 计算年化收益
     total_return = data["Strategy_Cum"].dropna().iloc[-1] - 1
