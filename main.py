@@ -24,7 +24,7 @@ def main():
     data.loc[data["MA5"] > data["MA20"], "Signal"] = 1
 
     # 根据交易策略实施持仓情况
-    data["Position"] = data["Signal"].shift(1).fillna(0)
+    data["Position"] = data["Signal"].shift(1, fill_value=0)
 
     data["Market_Return"] = data["close"].pct_change()
 
@@ -43,15 +43,17 @@ def main():
     data["Market_Cum"] = (1 + data["Market_Return"]).cumprod()
     data["Strategy_Cum"] = (1 + data["Strategy_Return"]).cumprod()
     
-    # 计算回撤
+    # 计算最大回撤
     data["Strategy_Peak"] = data["Strategy_Cum"].cummax()
     data["Drawdown"] = data["Strategy_Cum"] / data["Strategy_Peak"] - 1
     max_drawdown = data["Drawdown"].min()
 
-    # 计算买入和卖出信号
-    data["Buy"] = (1 == data["Signal"]) & (0 == data["Signal"].shift(1))
-    data["Sell"] = (0 == data["Signal"]) & (1 == data["Signal"].shift(1))
-    
+    # 标记买入和卖出信号
+    data["Buy"] = (1 == data["Signal"]) & \
+        (0 == data["Signal"].shift(1, fill_value=0))
+    data["Sell"] = (0 == data["Signal"]) & \
+        (1 == data["Signal"].shift(1, fill_value=0))
+
     # 计算年化收益
     total_return = data["Strategy_Cum"].dropna().iloc[-1] - 1
     days = (data.index[-1] - data.index[0]).days
@@ -60,6 +62,21 @@ def main():
     # 计算夏普比率，假设一年有 252 个交易日
     daily_return = data["Strategy_Return"].dropna()
     sharpe = daily_return.mean() / daily_return.std() * (252 ** 0.5)
+    
+    # 获取每笔交易的详细信息
+    trades = track_every_trade(data)
+    # 计算胜率和平均每笔收益
+    win_rate = (trades["return"] > 0).mean()
+    avg_trade_return = trades["return"].mean()
+
+    print(f"买入并持有最终收益倍数：{round(data['Market_Cum'].dropna().iloc[-1], 2)}")
+    print(f"均线策略最终收益倍数：{round(data['Strategy_Cum'].dropna().iloc[-1], 2)}")
+    print(f"交易次数：{int(data['Trade'].sum())}")
+    print(f"年化收益率：{round(annual_return * 100, 2)}%")
+    print(f"最大回撤：{round(max_drawdown * 100, 2)}%")
+    print(f"夏普比率：{round(sharpe, 2)}")
+    print(f"胜率：{round(win_rate * 100, 2)}%")
+    print(f"平均每笔收益：{round(avg_trade_return * 100, 2)}%")
 
     # 画图
     plt.figure(figsize=(12, 6))
@@ -93,13 +110,6 @@ def main():
     plt.grid(True)
 
     plt.show()
-
-    print(f"买入并持有最终收益倍数：{round(data['Market_Cum'].dropna().iloc[-1], 2)}")
-    print(f"均线策略最终收益倍数：{round(data['Strategy_Cum'].dropna().iloc[-1], 2)}")
-    print(f"交易次数：{int(data['Buy'].sum() + data['Sell'].sum())}")
-    print(f"年化收益率：{round(annual_return * 100, 2)}%")
-    print(f"最大回撤：{round(max_drawdown * 100, 2)}%")
-    print(f"夏普比率：{round(sharpe, 2)}")
 
 # 统一东财与其他数据接口的格式
 def normalise_stock_data(data):
@@ -170,6 +180,38 @@ def fetch_stock_data():
             return data
 
     raise RuntimeError("三个数据接口全部获取失败，请检查网络连接或 AkShare 服务状态")
+
+# 追踪每一笔交易的情况
+def track_every_trade(data):
+    # 因为 Buy 是前一天的信号，所以要 shift(1) 来获取前一天的信号
+    data["Buy_Pos"] = data["Buy"].shift(1, fill_value=False)
+    data["Sell_Pos"] = data["Sell"].shift(1, fill_value=False)
+
+    trades = []
+    buy_date = None
+    buy_price = None
+    
+    for date, row in data.iterrows():
+        if row["Buy_Pos"]:
+            buy_date = date
+            buy_price = row["close"]
+        elif row["Sell_Pos"]:
+            sell_date = date
+            sell_price = row["close"]
+            
+            trade_return = sell_price / buy_price - 1
+            holding_days = (sell_date - buy_date).days
+            
+            trades.append({
+                "buy_date": buy_date,
+                "buy_price": buy_price,
+                "sell_date": sell_date,
+                "sell_price": sell_price,
+                "holding_days": holding_days,
+                "return": trade_return
+            })
+
+    return pd.DataFrame(trades)
 
 if __name__ == "__main__":
     main()
