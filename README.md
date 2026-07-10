@@ -49,7 +49,7 @@ config/
   paths.py                 # 项目内数据路径的唯一来源
 src/
   stock_pool.py            # 股票代码与股票池校验
-  data_fetcher.py          # 行情数据源封装
+  data_fetcher.py          # 理杏仁行情与指数成分接口封装
   data_cleaner.py          # 行情清洗
   factor_calculator.py     # 原始因子计算
   factor_preprocessor.py   # MAD 去极值、z-score、覆盖率报告
@@ -66,12 +66,22 @@ main.py                    # 单股票均线练习示例
 
 行情和报告会写入 `data/`，目前默认不提交，以免把本地运行产物和大文件带进协作仓库。
 
+理杏仁 Token 仅保存在本机项目根目录 `.env`，可从 `.env.example` 创建模板；它绝不能进入 Git。
+
 ## 快速开始
 
 ```powershell
 uv sync
 uv run python run_all.py --symbols 000001 000002 000063 000333 600000
 ```
+
+使用某一日期的沪深 300 成分股快照：
+
+```powershell
+uv run python run_all.py --universe-date 2024-01-02
+```
+
+这只是第一版的点时股票池接口。全历史回测必须使用逐日或逐次调样的历史成分股，不能用某一天的成分股回填整个历史区间。
 
 基础流程会获取、清洗行情并生成原始因子。继续做预处理：
 

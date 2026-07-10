@@ -10,6 +10,8 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 
 - Working branch: `Hush`, tracking `origin/Hush`.
 - Default flow: `run_all.py` -> market fetch -> cleaning -> raw factors -> optional preprocessing -> non-overlapping Rank IC -> optional quantile returns.
+- Initial stock universe: point-in-time CSI 300 constituents from Lixinger. This is a snapshot interface, not yet the full historical dynamic universe needed for production backtests.
+- Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
 - Current factors: 20-day momentum, 5-day reversal, 20-day volatility, and a liquidity proxy.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
 - `data/` is ignored for now. Do not commit API tokens, `.env`, caches, or large generated datasets without explicit agreement.
@@ -27,11 +29,18 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 ## 4. Research correctness rules
 
 - Factors must only use information available on the factor date.
+- Never backfill a full historical test with one current CSI 300 constituent snapshot; that creates survivorship bias.
 - Financial data becomes usable on its publication date, not the accounting period end date.
 - Rank IC with an N-day forward return should use non-overlapping or explicitly adjusted samples; otherwise overlapping windows exaggerate stability.
 - A positive backtest alone is insufficient. Check costs, slippage, turnover, suspensions, price limits, delistings, and sample-out performance.
 - A negative IC can still be useful if it is stable and its sign is explicitly reversed before combination.
 - Start with simple, explainable equal-weight factor combinations before complex models.
+
+## 4.1 Lixinger implementation notes
+
+- Use a request header of `Accept-Encoding: gzip`; requests without it receive a validation error from the API.
+- Read `LIXINGER_TOKEN` from the environment or this project's local `.env`, never from a hard-coded value or another repository path.
+- The candlestick endpoint's price-adjustment convention must be confirmed before it is used for production return research. Do not label it as adjusted without evidence from the provider documentation.
 
 ## 5. Git workflow
 
@@ -43,4 +52,4 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 
 ## 6. Suggested next research milestone
 
-Implement a point-in-time CSI 300 stock universe and its investability filters before adding many more factors. The first full strategy target is: CSI 300, monthly rebalance, 20-trading-day horizon, a small set of interpretable factors, Top N equal-weight holdings, and a transaction-cost-aware benchmark comparison.
+Implement historical CSI 300 membership and investability filters before adding many more factors. The first full strategy target is: CSI 300, monthly rebalance, 20-trading-day horizon, a small set of interpretable factors, Top N equal-weight holdings, and a transaction-cost-aware benchmark comparison.
