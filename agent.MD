@@ -12,6 +12,8 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Default flow: `run_all.py` -> market fetch -> cleaning -> raw factors -> optional preprocessing -> non-overlapping Rank IC -> optional quantile returns.
 - Initial stock universe: point-in-time CSI 300 constituents from Lixinger. This is a snapshot interface, not yet the full historical dynamic universe needed for production backtests.
 - Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
+- Market cleaning validates prices and OHLC ranges, removes duplicate `(date, symbol)` rows by retaining the latest response, and preserves zero-activity bars as `is_tradable=False`.
+- The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.
 - Current factors: 20-day momentum, 5-day reversal, 20-day volatility, and a liquidity proxy.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
 - `data/` is ignored for now. Do not commit API tokens, `.env`, caches, or large generated datasets without explicit agreement.
@@ -33,6 +35,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Financial data becomes usable on its publication date, not the accounting period end date.
 - Rank IC with an N-day forward return should use non-overlapping or explicitly adjusted samples; otherwise overlapping windows exaggerate stability.
 - A positive backtest alone is insufficient. Check costs, slippage, turnover, suspensions, price limits, delistings, and sample-out performance.
+- The cleaner must not forward-fill price bars or discard a zero-volume bar merely to make a panel rectangular; tradability is a later business decision.
 - A negative IC can still be useful if it is stable and its sign is explicitly reversed before combination.
 - Start with simple, explainable equal-weight factor combinations before complex models.
 
@@ -40,7 +43,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 
 - Use a request header of `Accept-Encoding: gzip`; requests without it receive a validation error from the API.
 - Read `LIXINGER_TOKEN` from the environment or this project's local `.env`, never from a hard-coded value or another repository path.
-- The candlestick endpoint's price-adjustment convention must be confirmed before it is used for production return research. Do not label it as adjusted without evidence from the provider documentation.
+- Research bars use Lixinger front-adjusted `lxr_fc_rights`, which includes dividend reinvestment. Execution work must explicitly request unadjusted `ex_rights` prices; never use an adjusted price as a simulated fill price.
 
 ## 5. Git workflow
 

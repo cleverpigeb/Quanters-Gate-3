@@ -8,6 +8,8 @@ MIN_LISTING_DAYS = 60
 
 LIXINGER_INDEX_CONSTITUENTS_URL = "https://open.lixinger.com/api/cn/index/constituents"
 LIXINGER_COMPANY_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/company/candlestick"
+LIXINGER_RESEARCH_PRICE_TYPE = "lxr_fc_rights"
+LIXINGER_EXECUTION_PRICE_TYPE = "ex_rights"
 
 FORWARD_DAYS = 20
 IC_SAMPLE_STEP = 20

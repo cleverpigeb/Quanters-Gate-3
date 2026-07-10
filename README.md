@@ -50,7 +50,7 @@ config/
 src/
   stock_pool.py            # 股票代码与股票池校验
   data_fetcher.py          # 理杏仁行情与指数成分接口封装
-  data_cleaner.py          # 行情清洗
+  data_cleaner.py          # 行情校验、去重、可交易状态和清洗摘要
   factor_calculator.py     # 原始因子计算
   factor_preprocessor.py   # MAD 去极值、z-score、覆盖率报告
   ic_analyzer.py           # 未来收益与非重叠 Rank IC
@@ -68,6 +68,8 @@ main.py                    # 单股票均线练习示例
 
 理杏仁 Token 仅保存在本机项目根目录 `.env`，可从 `.env.example` 创建模板；它绝不能进入 Git。
 
+研究默认使用理杏仁前复权 `lxr_fc_rights` 的价格计算收益和价格因子，它包含分红再投入。未来的成交模拟与实盘执行必须显式改用不复权 `ex_rights` 价格，不能混用两种口径。
+
 ## 快速开始
 
 ```powershell
@@ -82,6 +84,8 @@ uv run python run_all.py --universe-date 2024-01-02
 ```
 
 这只是第一版的点时股票池接口。全历史回测必须使用逐日或逐次调样的历史成分股，不能用某一天的成分股回填整个历史区间。
+
+清洗层不会前填缺失行情。它会保留零成交记录并标记为 `is_tradable=False`，从而让后续股票池和回测模块决定如何处理停牌，而不是提前抹掉这一事实。
 
 基础流程会获取、清洗行情并生成原始因子。继续做预处理：
 

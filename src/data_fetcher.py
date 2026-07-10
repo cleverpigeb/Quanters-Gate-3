@@ -5,7 +5,11 @@ import pandas as pd
 import requests
 
 from config.paths import PROJECT_ROOT
-from config.settings import LIXINGER_COMPANY_CANDLESTICK_URL, LIXINGER_INDEX_CONSTITUENTS_URL
+from config.settings import (
+    LIXINGER_COMPANY_CANDLESTICK_URL,
+    LIXINGER_INDEX_CONSTITUENTS_URL,
+    LIXINGER_RESEARCH_PRICE_TYPE,
+)
 
 
 class LixingerClient:
@@ -71,13 +75,19 @@ class LixingerClient:
             )
         return pd.DataFrame(rows)
 
-    def fetch_daily_bars(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """Fetch daily company candles in the provider's native price-adjustment convention."""
+    def fetch_daily_bars(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+    ) -> pd.DataFrame:
+        """Fetch daily company candles using an explicit Lixinger price convention."""
         records = self._post(
             LIXINGER_COMPANY_CANDLESTICK_URL,
             {
                 "stockCode": symbol,
-                "type": "day",
+                "type": price_type,
                 "startDate": pd.Timestamp(start_date).strftime("%Y-%m-%d"),
                 "endDate": pd.Timestamp(end_date).strftime("%Y-%m-%d"),
             },
@@ -91,11 +101,12 @@ class LixingerClient:
         if missing:
             raise ValueError(f"Unexpected daily-bar columns for {symbol}: {missing}")
         data["symbol"] = symbol
+        data["price_type"] = price_type
         data["date"] = pd.to_datetime(data["date"])
         for column in required_columns[1:] + ["turnover"]:
             if column in data.columns:
                 data[column] = pd.to_numeric(data[column], errors="coerce")
-        keep_columns = required_columns + ["symbol", "turnover"]
+        keep_columns = required_columns + ["symbol", "turnover", "price_type"]
         return data[[column for column in keep_columns if column in data.columns]]
 
 
@@ -104,6 +115,7 @@ def fetch_universe_daily_bars(
     start_date: str,
     end_date: str,
     client: LixingerClient | None = None,
+    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
 ) -> pd.DataFrame:
     """Fetch one price panel while preserving usable symbols if individual requests fail."""
     lixinger = client or LixingerClient()
@@ -111,7 +123,7 @@ def fetch_universe_daily_bars(
     failures: list[str] = []
     for symbol in symbols:
         try:
-            frames.append(lixinger.fetch_daily_bars(symbol, start_date, end_date))
+            frames.append(lixinger.fetch_daily_bars(symbol, start_date, end_date, price_type))
         except Exception as error:
             failures.append(f"{symbol}: {error}")
     if not frames:

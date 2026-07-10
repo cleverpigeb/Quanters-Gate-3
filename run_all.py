@@ -19,7 +19,7 @@ from config.settings import (
     PRICE_FACTOR_COLUMNS,
     QUANTILE_COUNT,
 )
-from src.data_cleaner import clean_daily_bars
+from src.data_cleaner import build_cleaning_summary, clean_daily_bars
 from src.data_fetcher import LixingerClient, fetch_universe_daily_bars
 from src.factor_calculator import calculate_price_factors
 from src.factor_evaluator import calculate_quantile_returns, summarize_quantile_returns
@@ -64,6 +64,9 @@ def main() -> None:
     raw_data.to_csv(MARKET_RAW_DIR / "daily_bars.csv", index=False, encoding="utf-8-sig")
     clean_data = clean_daily_bars(raw_data)
     clean_data.to_csv(MARKET_PROCESSED_DIR / "daily_bars.csv", index=False, encoding="utf-8-sig")
+    build_cleaning_summary(raw_data, clean_data).to_csv(
+        REPORT_DIR / "market_cleaning_summary.csv", index=False, encoding="utf-8-sig"
+    )
 
     factor_data = calculate_price_factors(clean_data)
     factor_data.to_csv(FACTOR_RAW_DIR / "price_factors.csv", index=False, encoding="utf-8-sig")
