@@ -7,5 +7,6 @@ requires-python = ">=3.14"
 dependencies = [
     "akshare>=1.18.64",
     "matplotlib>=3.11.0",
+    "numpy>=2.0.0",
     "pandas>=3.0.3",
 ]

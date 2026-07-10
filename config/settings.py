@@ -1,0 +1,14 @@
+DEFAULT_START_DATE = "2021-01-01"
+DEFAULT_END_DATE = "2026-06-30"
+DEFAULT_UNIVERSE = ("000001", "000002", "000063", "000333", "600000")
+
+FORWARD_DAYS = 20
+IC_SAMPLE_STEP = 20
+QUANTILE_COUNT = 5
+
+PRICE_FACTOR_COLUMNS = (
+    "momentum_20d",
+    "reversal_5d",
+    "volatility_20d",
+    "turnover_proxy_20d",
+)
