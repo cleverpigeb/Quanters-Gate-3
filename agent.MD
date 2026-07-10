@@ -48,7 +48,8 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 2. Inspect `git status` before editing and before committing.
 3. Keep each commit scoped and explainable.
 4. Before push: run relevant checks, review `git diff --cached --check`, and update README/agent.MD as required above.
-5. Push to `origin Hush`. Merge to `main` through a Pull Request when the team agrees.
+5. Do not commit or push merely because code changes are complete. Wait for explicit user authorization to commit and/or push after the user has reviewed the local changes.
+6. When explicitly authorized, push to `origin Hush`. Merge to `main` through a Pull Request when the team agrees.
 
 ## 6. Suggested next research milestone
 
