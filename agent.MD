@@ -18,7 +18,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - All 20-day factors require a full 20-trading-day lookback. Do not fill warm-up observations just to enlarge an analysis sample.
 - Preprocessing applies MAD winsorization and z-score separately on each trading-date cross-section, while preserving missing factor values.
 - IC analysis uses close-to-close forward returns and samples every `IC_SAMPLE_STEP` trading dates to avoid overlapping forward-return windows. Never shift factor values forward to manufacture an IC result.
-- Quantile evaluation is equal-weighted by design. Its output is a factor diagnostic, not a transaction-cost-aware strategy backtest.
+- Quantile evaluation is equal-weighted and sampled every `IC_SAMPLE_STEP` dates. Its output is a factor diagnostic, not a transaction-cost-aware strategy backtest.
 - A five-stock end-to-end run for 2021-01-04 to 2026-06-30 completed successfully. Treat it only as a pipeline smoke test; five names are far too few for an alpha conclusion.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
 - `data/` is ignored for now. Do not commit API tokens, `.env`, caches, or large generated datasets without explicit agreement.

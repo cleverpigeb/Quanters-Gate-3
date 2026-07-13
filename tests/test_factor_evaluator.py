@@ -25,7 +25,7 @@ class FactorEvaluatorTests(unittest.TestCase):
         self.panel = pd.DataFrame(rows)
 
     def test_quantile_returns_and_top_bottom_spread(self) -> None:
-        returns = calculate_quantile_returns(self.panel, ["test_factor"], 20, 5)
+        returns = calculate_quantile_returns(self.panel, ["test_factor"], 20, 5, sample_step=1)
         summary = summarize_quantile_returns(returns)
         spreads = summarize_top_bottom_spreads(summary, 5)
 
@@ -35,7 +35,12 @@ class FactorEvaluatorTests(unittest.TestCase):
 
     def test_quantile_evaluation_rejects_too_few_groups(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least two"):
-            calculate_quantile_returns(self.panel, ["test_factor"], 20, 1)
+            calculate_quantile_returns(self.panel, ["test_factor"], 20, 1, sample_step=1)
+
+    def test_quantile_evaluation_respects_non_overlapping_sample_step(self) -> None:
+        returns = calculate_quantile_returns(self.panel, ["test_factor"], 20, 5, sample_step=2)
+
+        self.assertEqual(len(returns), 5)
 
 
 if __name__ == "__main__":

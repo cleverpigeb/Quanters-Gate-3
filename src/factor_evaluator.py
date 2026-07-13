@@ -23,12 +23,17 @@ def calculate_quantile_returns(
     factor_columns: list[str],
     horizon: int,
     quantile_count: int,
+    sample_step: int,
 ) -> pd.DataFrame:
-    """Evaluate equal-weighted future returns for each factor quantile by date."""
+    """Evaluate equal-weighted factor quantiles on non-overlapping sample dates."""
     target = _validate_quantile_input(data, factor_columns, horizon, quantile_count)
+    if sample_step <= 0:
+        raise ValueError("Quantile sample step must be positive.")
     records: list[dict[str, object]] = []
     for factor in factor_columns:
-        for date, cross_section in data.groupby("date"):
+        dates = sorted(data["date"].dropna().unique())[::sample_step]
+        for date in dates:
+            cross_section = data.loc[data["date"] == date]
             usable = cross_section[[factor, target]].dropna()
             if len(usable) < quantile_count or usable[factor].nunique() < quantile_count:
                 continue

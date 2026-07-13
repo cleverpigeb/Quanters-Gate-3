@@ -96,7 +96,7 @@ def main() -> None:
 
     if args.with_evaluation:
         quantile_returns = calculate_quantile_returns(
-            factor_data, factor_columns, args.horizon, QUANTILE_COUNT
+            factor_data, factor_columns, args.horizon, QUANTILE_COUNT, IC_SAMPLE_STEP
         )
         quantile_summary = summarize_quantile_returns(quantile_returns)
         quantile_returns.to_csv(
