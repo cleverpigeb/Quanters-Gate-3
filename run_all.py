@@ -22,7 +22,11 @@ from config.settings import (
 from src.data_cleaner import build_cleaning_summary, clean_daily_bars
 from src.data_fetcher import LixingerClient, fetch_universe_daily_bars
 from src.factor_calculator import calculate_price_factors
-from src.factor_evaluator import calculate_quantile_returns, summarize_quantile_returns
+from src.factor_evaluator import (
+    calculate_quantile_returns,
+    summarize_quantile_returns,
+    summarize_top_bottom_spreads,
+)
 from src.factor_preprocessor import build_preprocess_summary, preprocess_factors
 from src.ic_analyzer import add_forward_returns, calculate_rank_ic, summarize_rank_ic
 from src.stock_pool import build_index_stock_pool, normalize_symbols
@@ -94,8 +98,15 @@ def main() -> None:
         quantile_returns = calculate_quantile_returns(
             factor_data, factor_columns, args.horizon, QUANTILE_COUNT
         )
-        summarize_quantile_returns(quantile_returns).to_csv(
-            REPORT_DIR / f"quantile_returns_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        quantile_summary = summarize_quantile_returns(quantile_returns)
+        quantile_returns.to_csv(
+            REPORT_DIR / f"quantile_return_timeseries_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        )
+        quantile_summary.to_csv(
+            REPORT_DIR / f"quantile_return_summary_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        )
+        summarize_top_bottom_spreads(quantile_summary, QUANTILE_COUNT).to_csv(
+            REPORT_DIR / f"quantile_spread_summary_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
         )
 
     print("Research analysis completed.")
