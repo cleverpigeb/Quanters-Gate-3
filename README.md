@@ -52,7 +52,7 @@ src/
   data_fetcher.py          # 理杏仁行情与指数成分接口封装
   data_cleaner.py          # 行情校验、去重、可交易状态和清洗摘要
   factor_calculator.py     # 原始因子计算
-  factor_preprocessor.py   # MAD 去极值、z-score、覆盖率报告
+  factor_preprocessor.py   # 截面 MAD 去极值、z-score、覆盖率报告
   ic_analyzer.py           # 未来收益与非重叠 Rank IC
   factor_evaluator.py      # 因子分组收益评估
 data/

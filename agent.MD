@@ -16,6 +16,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.
 - Current factors: 20-day momentum, 5-day reversal, 20-day volatility, and a liquidity proxy.
 - All 20-day factors require a full 20-trading-day lookback. Do not fill warm-up observations just to enlarge an analysis sample.
+- Preprocessing applies MAD winsorization and z-score separately on each trading-date cross-section, while preserving missing factor values.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
 - `data/` is ignored for now. Do not commit API tokens, `.env`, caches, or large generated datasets without explicit agreement.
 
