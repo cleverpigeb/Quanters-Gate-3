@@ -17,6 +17,11 @@ def normalize_symbols(symbols: Iterable[str]) -> list[str]:
     return normalized
 
 
+def _normalize_shanghai_dates(values: pd.Series) -> pd.Series:
+    dates = pd.to_datetime(values, errors="coerce", utc=True)
+    return dates.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None).dt.normalize()
+
+
 def build_index_stock_pool(
     constituents: pd.DataFrame,
     index_code: str,
@@ -38,8 +43,7 @@ def build_index_stock_pool(
 
 def monthly_rebalance_dates(trading_dates: pd.Series) -> list[pd.Timestamp]:
     """Select the last real trading date in each calendar month."""
-    dates = pd.to_datetime(trading_dates, errors="coerce", utc=True)
-    dates = dates.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None).dt.normalize().dropna()
+    dates = _normalize_shanghai_dates(trading_dates).dropna()
     if dates.empty:
         raise ValueError("Trading-date series cannot be empty.")
     month_ends = dates.groupby(dates.dt.to_period("M")).max()
@@ -61,3 +65,33 @@ def build_index_stock_pool_history(
     return history.sort_values(["as_of_date", "symbol"]).drop_duplicates(
         ["as_of_date", "symbol"], keep="last"
     ).reset_index(drop=True)
+
+
+def filter_to_membership_history(data: pd.DataFrame, membership_history: pd.DataFrame) -> pd.DataFrame:
+    """Keep bars whose symbols belong to the latest monthly index snapshot for that date."""
+    required_data = {"date", "symbol"}
+    required_membership = {"as_of_date", "symbol"}
+    missing_data = required_data.difference(data.columns)
+    missing_membership = required_membership.difference(membership_history.columns)
+    if missing_data:
+        raise ValueError(f"Market data is missing columns: {missing_data}")
+    if missing_membership:
+        raise ValueError(f"Membership history is missing columns: {missing_membership}")
+
+    market = data.copy()
+    market["date"] = _normalize_shanghai_dates(market["date"])
+    market["symbol"] = market["symbol"].astype("string")
+    history = membership_history[["as_of_date", "symbol"]].copy()
+    history["as_of_date"] = _normalize_shanghai_dates(history["as_of_date"])
+    history["symbol"] = history["symbol"].astype("string")
+
+    schedule = history[["as_of_date"]].drop_duplicates().sort_values("as_of_date")
+    dated_market = pd.merge_asof(
+        market.sort_values(["date", "symbol"]),
+        schedule,
+        left_on="date",
+        right_on="as_of_date",
+        direction="backward",
+    )
+    eligible = dated_market.merge(history, on=["as_of_date", "symbol"], how="inner")
+    return eligible.drop(columns="as_of_date").sort_values(["symbol", "date"]).reset_index(drop=True)

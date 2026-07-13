@@ -8,6 +8,7 @@ UNIVERSE_DIR = DATA_DIR / "universe"
 
 MARKET_DIR = DATA_DIR / "market"
 MARKET_RAW_DIR = MARKET_DIR / "raw"
+MARKET_RAW_BY_SYMBOL_DIR = MARKET_RAW_DIR / "by_symbol"
 MARKET_PROCESSED_DIR = MARKET_DIR / "processed"
 
 FACTOR_DIR = DATA_DIR / "factors"
@@ -20,6 +21,7 @@ REPORT_DIR = DATA_DIR / "reports"
 def ensure_project_directories() -> None:
     for directory in (
         MARKET_RAW_DIR,
+        MARKET_RAW_BY_SYMBOL_DIR,
         MARKET_PROCESSED_DIR,
         UNIVERSE_DIR,
         FACTOR_RAW_DIR,

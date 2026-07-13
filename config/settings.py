@@ -7,6 +7,7 @@ INITIAL_UNIVERSE_NAME = "CSI 300"
 MIN_LISTING_DAYS = 60
 REBALANCE_FREQUENCY = "ME"
 UNIVERSE_SNAPSHOT_BATCH_SIZE = 12
+MARKET_FETCH_BATCH_SIZE = 12
 
 LIXINGER_INDEX_CONSTITUENTS_URL = "https://open.lixinger.com/api/cn/index/constituents"
 LIXINGER_INDEX_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/index/candlestick"

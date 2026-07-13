@@ -7,6 +7,7 @@ from config.paths import (
     FACTOR_RAW_DIR,
     MARKET_PROCESSED_DIR,
     MARKET_RAW_DIR,
+    MARKET_RAW_BY_SYMBOL_DIR,
     REPORT_DIR,
     UNIVERSE_DIR,
     ensure_project_directories,
@@ -18,13 +19,19 @@ from config.settings import (
     FORWARD_DAYS,
     IC_SAMPLE_STEP,
     INITIAL_UNIVERSE_INDEX,
+    MARKET_FETCH_BATCH_SIZE,
     PRICE_FACTOR_COLUMNS,
     QUANTILE_COUNT,
     REBALANCE_FREQUENCY,
     UNIVERSE_SNAPSHOT_BATCH_SIZE,
 )
 from src.data_cleaner import build_cleaning_summary, clean_daily_bars
-from src.data_fetcher import LixingerClient, fetch_universe_daily_bars
+from src.data_fetcher import (
+    LixingerClient,
+    cache_daily_bar_batch,
+    fetch_universe_daily_bars,
+    load_cached_daily_bars,
+)
 from src.factor_calculator import calculate_price_factors
 from src.factor_evaluator import (
     calculate_quantile_returns,
@@ -36,6 +43,7 @@ from src.ic_analyzer import add_forward_returns, calculate_rank_ic, summarize_ra
 from src.stock_pool import (
     build_index_stock_pool,
     build_index_stock_pool_history,
+    filter_to_membership_history,
     monthly_rebalance_dates,
     normalize_symbols,
 )
@@ -58,6 +66,22 @@ def parse_args() -> argparse.Namespace:
         default=UNIVERSE_SNAPSHOT_BATCH_SIZE,
         help="Maximum missing monthly constituent snapshots to fetch in one run.",
     )
+    parser.add_argument(
+        "--build-market-history",
+        action="store_true",
+        help="Fetch cached daily bars for all symbols in monthly CSI 300 membership history and exit.",
+    )
+    parser.add_argument(
+        "--run-market-history",
+        action="store_true",
+        help="Run the research pipeline on the completed monthly CSI 300 historical market panel.",
+    )
+    parser.add_argument(
+        "--max-market-symbols",
+        type=int,
+        default=MARKET_FETCH_BATCH_SIZE,
+        help="Maximum missing symbol histories to fetch in one market-history run.",
+    )
     parser.add_argument("--start", default=DEFAULT_START_DATE)
     parser.add_argument("--end", default=DEFAULT_END_DATE)
     parser.add_argument("--horizon", type=int, default=FORWARD_DAYS)
@@ -72,6 +96,7 @@ def main() -> None:
     ensure_project_directories()
 
     client = LixingerClient()
+    membership_path = UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_membership.csv"
     if args.build_universe_history:
         if args.universe_date:
             raise ValueError("Use either --universe-date or --build-universe-history, not both.")
@@ -111,7 +136,43 @@ def main() -> None:
         print(f"Built {len(rebalancing_dates)} monthly snapshots with {len(membership)} membership rows.")
         return
 
-    if args.universe_date:
+    if args.build_market_history:
+        if not membership_path.exists():
+            raise FileNotFoundError("Build the monthly universe history before fetching market history.")
+        membership_history = pd.read_csv(membership_path, dtype={"symbol": "string"})
+        symbols = sorted(membership_history["symbol"].unique().tolist())
+        progress = cache_daily_bar_batch(
+            symbols,
+            args.start,
+            args.end,
+            MARKET_RAW_BY_SYMBOL_DIR,
+            client,
+            args.max_market_symbols,
+        )
+        if progress["remaining"]:
+            print(
+                f"Cached {progress['cached'] + progress['fetched']}/{progress['total']} symbol histories. "
+                "Run the same command again to continue."
+            )
+            return
+        raw_history = load_cached_daily_bars(MARKET_RAW_BY_SYMBOL_DIR, symbols)
+        eligible_history = filter_to_membership_history(raw_history, membership_history)
+        eligible_history.to_csv(
+            MARKET_RAW_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+        print(f"Built historical market panel with {len(eligible_history)} eligible daily bars.")
+        return
+
+    if args.run_market_history:
+        if args.universe_date:
+            raise ValueError("Use either --universe-date or --run-market-history, not both.")
+        history_panel_path = MARKET_RAW_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv"
+        if not history_panel_path.exists():
+            raise FileNotFoundError("Build the membership-filtered market panel before running historical research.")
+        raw_data = pd.read_csv(history_panel_path, dtype={"symbol": "string"})
+    elif args.universe_date:
         constituents = client.fetch_index_constituents(INITIAL_UNIVERSE_INDEX, args.universe_date)
         stock_pool = build_index_stock_pool(constituents, INITIAL_UNIVERSE_INDEX, args.universe_date)
         stock_pool.to_csv(
@@ -120,10 +181,11 @@ def main() -> None:
             encoding="utf-8-sig",
         )
         symbols = stock_pool["symbol"].tolist()
+        raw_data = fetch_universe_daily_bars(symbols, args.start, args.end, client=client)
     else:
         symbols = normalize_symbols(args.symbols)
+        raw_data = fetch_universe_daily_bars(symbols, args.start, args.end, client=client)
 
-    raw_data = fetch_universe_daily_bars(symbols, args.start, args.end, client=client)
     raw_data.to_csv(MARKET_RAW_DIR / "daily_bars.csv", index=False, encoding="utf-8-sig")
     clean_data = clean_daily_bars(raw_data)
     clean_data.to_csv(MARKET_PROCESSED_DIR / "daily_bars.csv", index=False, encoding="utf-8-sig")

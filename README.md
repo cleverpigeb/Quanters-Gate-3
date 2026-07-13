@@ -57,7 +57,7 @@ src/
   factor_evaluator.py      # 因子分组收益评估
 data/
   universe/                 # 沪深 300 的点时成分股快照与历史表
-  market/{raw,processed}/
+  market/{raw,processed}/  # raw/by_symbol 支持断点续跑的逐股票日线缓存
   factors/{raw,processed}/
   reports/
 notebooks/                 # 探索性研究和人工检查，不放正式主流程
@@ -95,6 +95,22 @@ uv run python run_all.py --build-universe-history
 该命令先用沪深 300 指数日线确定每月最后一个真实交易日，再请求每个日期对应的成分股快照，输出到 `data/universe/`。它只构建股票池，不会同时下载 300 只股票的全部行情。
 
 为避免接口请求过长，每次默认只补 12 个缺失月份；重复执行同一命令会自动跳过已保存快照，直到生成完整成分历史表。可用 `--max-universe-snapshots 6` 调整单次批量。
+
+构建历史成分股的日线缓存与合格研究面板：
+
+```powershell
+uv run python run_all.py --build-market-history
+```
+
+该命令每次默认下载 12 只缺失股票的日线并保存到 `data/market/raw/by_symbol/`；完成全部历史成分股后，会自动按每月历史成分筛选并输出面板。重复运行同一命令即可续跑。
+
+在完整历史面板上运行因子研究：
+
+```powershell
+uv run python run_all.py --run-market-history --with-evaluation
+```
+
+这会复用本地历史面板，不再请求行情接口，并覆盖 `data/reports/` 中的因子研究报告。
 
 清洗层不会前填缺失行情。它会保留零成交记录并标记为 `is_tradable=False`，从而让后续股票池和回测模块决定如何处理停牌，而不是提前抹掉这一事实。
 

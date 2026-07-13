@@ -160,3 +160,54 @@ def fetch_universe_daily_bars(
     if failures:
         print("Skipped symbols: " + "; ".join(failures))
     return pd.concat(frames, ignore_index=True)
+
+
+def _cache_covers_date_range(file_path: Path, start_date: str, end_date: str) -> bool:
+    if not file_path.exists():
+        return False
+    try:
+        dates = pd.to_datetime(
+            pd.read_csv(file_path, usecols=["date"])["date"], errors="coerce", utc=True
+        ).dt.tz_convert("Asia/Shanghai").dt.tz_localize(None).dt.normalize()
+        # A requested calendar start can be a holiday, or a stock may not yet be listed.
+        # Cached files are always fetched from the full requested range, so the end-date
+        # check is sufficient to distinguish an incomplete cache from a valid late start.
+        return dates.notna().any() and dates.max() >= pd.Timestamp(end_date).normalize()
+    except (OSError, ValueError, pd.errors.ParserError):
+        return False
+
+
+def cache_daily_bar_batch(
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    cache_dir: str | Path,
+    client: LixingerClient,
+    max_symbols: int,
+) -> dict[str, int]:
+    """Cache a bounded number of missing symbol histories for resumable bulk retrieval."""
+    if max_symbols <= 0:
+        raise ValueError("Maximum market symbols must be positive.")
+    directory = Path(cache_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    missing = [
+        symbol
+        for symbol in symbols
+        if not _cache_covers_date_range(directory / f"{symbol}.csv", start_date, end_date)
+    ]
+    fetched = 0
+    for symbol in missing[:max_symbols]:
+        bars = client.fetch_daily_bars(symbol, start_date, end_date)
+        bars.to_csv(directory / f"{symbol}.csv", index=False, encoding="utf-8-sig")
+        fetched += 1
+    return {"total": len(symbols), "cached": len(symbols) - len(missing), "fetched": fetched, "remaining": len(missing) - fetched}
+
+
+def load_cached_daily_bars(cache_dir: str | Path, symbols: list[str]) -> pd.DataFrame:
+    """Load one cached daily-bar file per symbol into a single long panel."""
+    directory = Path(cache_dir)
+    missing = [symbol for symbol in symbols if not (directory / f"{symbol}.csv").exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing cached daily bars for {len(missing)} symbols.")
+    frames = [pd.read_csv(directory / f"{symbol}.csv", dtype={"symbol": "string"}) for symbol in symbols]
+    return pd.concat(frames, ignore_index=True)

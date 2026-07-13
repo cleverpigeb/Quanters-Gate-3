@@ -13,7 +13,14 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Initial stock universe: point-in-time CSI 300 constituents from Lixinger. This is a snapshot interface, not yet the full historical dynamic universe needed for production backtests.
 - Monthly CSI 300 membership history is built from real CSI 300 trading dates, then one Lixinger constituent snapshot per month-end. It must be available before a full-universe historical backtest.
 - Universe snapshots are cached one month per CSV under `data/universe/` and built in small resumable batches. Do not replace this with aggressive parallel API requests.
+- Market history uses the same bounded, per-symbol cache under `data/market/raw/by_symbol/`. Only after every historical constituent has a complete price file does the pipeline create the membership-filtered panel.
+- Cache coverage checks normalize provider timestamps to timezone-naive Shanghai dates before comparing against the configured research range.
+- Read cached `symbol` columns with an explicit string dtype; otherwise leading-zero A-share codes fail to match membership history.
+- Apply membership by the global latest month-end snapshot for each market date, then exact-match symbols within that snapshot. Never as-of merge membership separately by symbol, because it incorrectly retains stocks after they leave the index.
 - The local 2021-01-29 to 2026-06-30 membership build completed with 66 snapshots and 19,800 rows. Every snapshot has 300 symbols; the first and last snapshots differ by 200 codes.
+- The completed membership-filtered market panel has 392,238 eligible daily bars across 458 symbols. Most days have 300 names; the minimum is 296 because a small number of member-day observations have no usable quote.
+- The first full CSI 300 research run completed with 64 non-overlapping 20-day observations and median cross-section size 300. The four initial raw factors are weak diagnostics only; none is ready to enter a trading strategy without further validation.
+- The monthly history contains 459 unique symbols across the full period. The local per-symbol market cache currently contains 24 histories; continue it in bounded batches rather than requesting all symbols at once.
 - Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
 - Market cleaning validates prices and OHLC ranges, removes duplicate `(date, symbol)` rows by retaining the latest response, and preserves zero-activity bars as `is_tradable=False`.
 - The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.
