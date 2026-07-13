@@ -11,6 +11,9 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Working branch: `Hush`, tracking `origin/Hush`.
 - Default flow: `run_all.py` -> market fetch -> cleaning -> raw factors -> optional preprocessing -> non-overlapping Rank IC -> optional quantile returns.
 - Initial stock universe: point-in-time CSI 300 constituents from Lixinger. This is a snapshot interface, not yet the full historical dynamic universe needed for production backtests.
+- Monthly CSI 300 membership history is built from real CSI 300 trading dates, then one Lixinger constituent snapshot per month-end. It must be available before a full-universe historical backtest.
+- Universe snapshots are cached one month per CSV under `data/universe/` and built in small resumable batches. Do not replace this with aggressive parallel API requests.
+- The local 2021-01-29 to 2026-06-30 membership build completed with 66 snapshots and 19,800 rows. Every snapshot has 300 symbols; the first and last snapshots differ by 200 codes.
 - Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
 - Market cleaning validates prices and OHLC ranges, removes duplicate `(date, symbol)` rows by retaining the latest response, and preserves zero-activity bars as `is_tradable=False`.
 - The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.

@@ -7,6 +7,7 @@ import requests
 from config.paths import PROJECT_ROOT
 from config.settings import (
     LIXINGER_COMPANY_CANDLESTICK_URL,
+    LIXINGER_INDEX_CANDLESTICK_URL,
     LIXINGER_INDEX_CONSTITUENTS_URL,
     LIXINGER_RESEARCH_PRICE_TYPE,
 )
@@ -74,6 +75,34 @@ class LixingerClient:
                 }
             )
         return pd.DataFrame(rows)
+
+    def fetch_index_daily_bars(self, index_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Fetch index daily bars to derive a real exchange trading calendar."""
+        records = self._post(
+            LIXINGER_INDEX_CANDLESTICK_URL,
+            {
+                "stockCode": index_code,
+                "type": "normal",
+                "startDate": pd.Timestamp(start_date).strftime("%Y-%m-%d"),
+                "endDate": pd.Timestamp(end_date).strftime("%Y-%m-%d"),
+            },
+        )
+        data = pd.DataFrame(records)
+        if data.empty or "date" not in data.columns:
+            raise RuntimeError(f"No index trading dates returned for {index_code}.")
+        data["date"] = pd.to_datetime(data["date"], errors="coerce")
+        return data.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+
+    def fetch_index_constituent_history(
+        self,
+        index_code: str,
+        as_of_dates: list[pd.Timestamp],
+    ) -> dict[pd.Timestamp, pd.DataFrame]:
+        """Fetch constituent snapshots for a supplied set of rebalancing dates."""
+        return {
+            date: self.fetch_index_constituents(index_code, date.strftime("%Y-%m-%d"))
+            for date in as_of_dates
+        }
 
     def fetch_daily_bars(
         self,

@@ -56,6 +56,7 @@ src/
   ic_analyzer.py           # 未来收益与非重叠 Rank IC
   factor_evaluator.py      # 因子分组收益评估
 data/
+  universe/                 # 沪深 300 的点时成分股快照与历史表
   market/{raw,processed}/
   factors/{raw,processed}/
   reports/
@@ -84,6 +85,16 @@ uv run python run_all.py --universe-date 2024-01-02
 ```
 
 这只是第一版的点时股票池接口。全历史回测必须使用逐日或逐次调样的历史成分股，不能用某一天的成分股回填整个历史区间。
+
+生成月频沪深 300 历史成分表：
+
+```powershell
+uv run python run_all.py --build-universe-history
+```
+
+该命令先用沪深 300 指数日线确定每月最后一个真实交易日，再请求每个日期对应的成分股快照，输出到 `data/universe/`。它只构建股票池，不会同时下载 300 只股票的全部行情。
+
+为避免接口请求过长，每次默认只补 12 个缺失月份；重复执行同一命令会自动跳过已保存快照，直到生成完整成分历史表。可用 `--max-universe-snapshots 6` 调整单次批量。
 
 清洗层不会前填缺失行情。它会保留零成交记录并标记为 `is_tradable=False`，从而让后续股票池和回测模块决定如何处理停牌，而不是提前抹掉这一事实。
 
