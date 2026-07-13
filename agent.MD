@@ -20,7 +20,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - The local 2021-01-29 to 2026-06-30 membership build completed with 66 snapshots and 19,800 rows. Every snapshot has 300 symbols; the first and last snapshots differ by 200 codes.
 - The completed membership-filtered market panel has 392,238 eligible daily bars across 458 symbols. Most days have 300 names; the minimum is 296 because a small number of member-day observations have no usable quote.
 - The first full CSI 300 research run completed with 64 non-overlapping 20-day observations and median cross-section size 300. The four initial raw factors are weak diagnostics only; none is ready to enter a trading strategy without further validation.
-- The monthly history contains 459 unique symbols across the full period. The local per-symbol market cache currently contains 24 histories; continue it in bounded batches rather than requesting all symbols at once.
+- The monthly history contains 459 unique symbols across the full period, and the local per-symbol market cache is complete. The cache remains local because the membership-filtered panel is the smaller reproducible input needed for research.
 - Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
 - Market cleaning validates prices and OHLC ranges, removes duplicate `(date, symbol)` rows by retaining the latest response, and preserves zero-activity bars as `is_tradable=False`.
 - The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.
@@ -31,7 +31,7 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Quantile evaluation is equal-weighted and sampled every `IC_SAMPLE_STEP` dates. Its output is a factor diagnostic, not a transaction-cost-aware strategy backtest.
 - A five-stock end-to-end run for 2021-01-04 to 2026-06-30 completed successfully. Treat it only as a pipeline smoke test; five names are far too few for an alpha conclusion.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
-- `data/` is ignored for now. Do not commit API tokens, `.env`, caches, or large generated datasets without explicit agreement.
+- `data/` is ignored by default. The explicit shared-data exception is the versioned CSI 300 snapshot: `data/universe/000300_ME_membership.csv`, `data/market/raw/000300_ME_panel.csv`, and `data/reports/*.csv`. Do not commit API tokens, `.env`, per-symbol caches, or regenerable cleaning/factor intermediates without explicit agreement.
 
 ## 3. Engineering rules
 

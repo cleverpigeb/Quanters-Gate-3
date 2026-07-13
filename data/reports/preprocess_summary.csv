@@ -1,0 +1,5 @@
+﻿factor,missing_rate,observation_count,usable_date_count,median_cross_section_size
+momentum_20d,0.022771888496270123,383306,1289,300.0
+reversal_5d,0.005715917376694762,389996,1304,300.0
+volatility_20d,0.022771888496270123,383306,1289,300.0
+turnover_proxy_20d,0.0216348237549651,383752,1290,300.0
