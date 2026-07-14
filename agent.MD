@@ -29,6 +29,11 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 - Preprocessing applies MAD winsorization and z-score separately on each trading-date cross-section, while preserving missing factor values.
 - IC analysis uses close-to-close forward returns and samples every `IC_SAMPLE_STEP` trading dates to avoid overlapping forward-return windows. Never shift factor values forward to manufacture an IC result.
 - Quantile evaluation is equal-weighted and sampled every `IC_SAMPLE_STEP` dates. Its output is a factor diagnostic, not a transaction-cost-aware strategy backtest.
+- The minimal portfolio research backtest is implemented in `src/portfolio_backtester.py`. It takes month-end signals, selects an equal-weighted Top N portfolio, and compares its forward return with the equal-weighted eligible universe. Defaults belong in `PORTFOLIO_FACTOR_WEIGHTS` and `PORTFOLIO_TOP_N`.
+- Its current return starts at the signal-date close and uses the existing future-N-available-bar return. It intentionally excludes execution delay, costs, price limits, ST/delisting rules, and cap-weighted index benchmarking. Never present its outputs as tradeable or live-strategy performance.
+- The first full-panel momentum-only Top 30 research run has 63 monthly observations: 47.79% portfolio total return versus 21.20% equal-weight-universe benchmark, but -53.94% maximum drawdown and 83.97% mean one-way turnover. It is a starting diagnostic, not a validated alpha result.
+- The next execution layer has a separate `data/market/execution/` cache and panel, fetched as `ex_rights` through `--build-execution-history`. `src/execution_returns.py` maps factor-date signals to the next available open and the open after the configured holding horizon; both must be tradable.
+- `--with-execution-backtest` refuses to use adjusted execution prices and applies the configurable `PORTFOLIO_ONE_WAY_COST_RATE`. It is not yet runnable until the unadjusted execution panel is built, and it still excludes cash dividends, price limits, ST/delisting rules, and real order fills.
 - A five-stock end-to-end run for 2021-01-04 to 2026-06-30 completed successfully. Treat it only as a pipeline smoke test; five names are far too few for an alpha conclusion.
 - `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
 - `data/` is ignored by default. The explicit shared-data exception is the versioned CSI 300 snapshot: `data/universe/000300_ME_membership.csv`, `data/market/raw/000300_ME_panel.csv`, and `data/reports/*.csv`. Do not commit API tokens, `.env`, per-symbol caches, or regenerable cleaning/factor intermediates without explicit agreement.
@@ -71,4 +76,4 @@ Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is 
 
 ## 6. Suggested next research milestone
 
-Implement historical CSI 300 membership and investability filters before adding many more factors. The first full strategy target is: CSI 300, monthly rebalance, 20-trading-day horizon, a small set of interpretable factors, Top N equal-weight holdings, and a transaction-cost-aware benchmark comparison.
+Add explicit investability filters and an execution-aware portfolio return model before adding many more factors. The next strategy target is: CSI 300, monthly rebalance, 20-trading-day horizon, a small set of interpretable factors, Top N equal-weight holdings, next-trading-day execution, and a transaction-cost-aware benchmark comparison.

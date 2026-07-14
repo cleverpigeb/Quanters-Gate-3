@@ -6,6 +6,8 @@ from config.paths import (
     FACTOR_PROCESSED_DIR,
     FACTOR_RAW_DIR,
     MARKET_PROCESSED_DIR,
+    MARKET_EXECUTION_BY_SYMBOL_DIR,
+    MARKET_EXECUTION_DIR,
     MARKET_RAW_DIR,
     MARKET_RAW_BY_SYMBOL_DIR,
     REPORT_DIR,
@@ -19,8 +21,12 @@ from config.settings import (
     FORWARD_DAYS,
     IC_SAMPLE_STEP,
     INITIAL_UNIVERSE_INDEX,
+    LIXINGER_EXECUTION_PRICE_TYPE,
     MARKET_FETCH_BATCH_SIZE,
     PRICE_FACTOR_COLUMNS,
+    PORTFOLIO_FACTOR_WEIGHTS,
+    PORTFOLIO_ONE_WAY_COST_RATE,
+    PORTFOLIO_TOP_N,
     QUANTILE_COUNT,
     REBALANCE_FREQUENCY,
     UNIVERSE_SNAPSHOT_BATCH_SIZE,
@@ -33,6 +39,7 @@ from src.data_fetcher import (
     load_cached_daily_bars,
 )
 from src.factor_calculator import calculate_price_factors
+from src.execution_returns import add_next_open_execution_returns
 from src.factor_evaluator import (
     calculate_quantile_returns,
     summarize_quantile_returns,
@@ -40,6 +47,7 @@ from src.factor_evaluator import (
 )
 from src.factor_preprocessor import build_preprocess_summary, preprocess_factors
 from src.ic_analyzer import add_forward_returns, calculate_rank_ic, summarize_rank_ic
+from src.portfolio_backtester import run_monthly_top_n_backtest, summarize_backtest
 from src.stock_pool import (
     build_index_stock_pool,
     build_index_stock_pool_history,
@@ -72,6 +80,11 @@ def parse_args() -> argparse.Namespace:
         help="Fetch cached daily bars for all symbols in monthly CSI 300 membership history and exit.",
     )
     parser.add_argument(
+        "--build-execution-history",
+        action="store_true",
+        help="Fetch unadjusted execution-price history and build the eligible panel.",
+    )
+    parser.add_argument(
         "--run-market-history",
         action="store_true",
         help="Run the research pipeline on the completed monthly CSI 300 historical market panel.",
@@ -88,6 +101,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--with-preprocess", action="store_true")
     parser.add_argument("--with-analysis", action="store_true")
     parser.add_argument("--with-evaluation", action="store_true")
+    parser.add_argument(
+        "--with-backtest",
+        action="store_true",
+        help="Run the simple monthly Top N factor-portfolio research backtest.",
+    )
+    parser.add_argument(
+        "--with-execution-backtest",
+        action="store_true",
+        help="Run the next-open, cost-adjusted research execution backtest.",
+    )
     return parser.parse_args()
 
 
@@ -95,13 +118,13 @@ def main() -> None:
     args = parse_args()
     ensure_project_directories()
 
-    client = LixingerClient()
     membership_path = UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_membership.csv"
     if args.build_universe_history:
         if args.universe_date:
             raise ValueError("Use either --universe-date or --build-universe-history, not both.")
         if args.max_universe_snapshots <= 0:
             raise ValueError("Maximum universe snapshots must be positive.")
+        client = LixingerClient()
         index_bars = client.fetch_index_daily_bars(INITIAL_UNIVERSE_INDEX, args.start, args.end)
         rebalancing_dates = monthly_rebalance_dates(index_bars["date"])
         snapshot_dir = UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_monthly_snapshots"
@@ -139,6 +162,7 @@ def main() -> None:
     if args.build_market_history:
         if not membership_path.exists():
             raise FileNotFoundError("Build the monthly universe history before fetching market history.")
+        client = LixingerClient()
         membership_history = pd.read_csv(membership_path, dtype={"symbol": "string"})
         symbols = sorted(membership_history["symbol"].unique().tolist())
         progress = cache_daily_bar_batch(
@@ -165,6 +189,27 @@ def main() -> None:
         print(f"Built historical market panel with {len(eligible_history)} eligible daily bars.")
         return
 
+    if args.build_execution_history:
+        if not membership_path.exists():
+            raise FileNotFoundError("Build the monthly universe history before fetching execution history.")
+        client = LixingerClient()
+        membership_history = pd.read_csv(membership_path, dtype={"symbol": "string"})
+        symbols = sorted(membership_history["symbol"].unique().tolist())
+        progress = cache_daily_bar_batch(
+            symbols, args.start, args.end, MARKET_EXECUTION_BY_SYMBOL_DIR, client,
+            args.max_market_symbols, LIXINGER_EXECUTION_PRICE_TYPE,
+        )
+        if progress["remaining"]:
+            print(f"Cached {progress['cached'] + progress['fetched']}/{progress['total']} execution histories. Run again to continue.")
+            return
+        execution = load_cached_daily_bars(MARKET_EXECUTION_BY_SYMBOL_DIR, symbols)
+        filter_to_membership_history(execution, membership_history).to_csv(
+            MARKET_EXECUTION_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv",
+            index=False, encoding="utf-8-sig",
+        )
+        print("Built historical execution panel.")
+        return
+
     if args.run_market_history:
         if args.universe_date:
             raise ValueError("Use either --universe-date or --run-market-history, not both.")
@@ -173,6 +218,7 @@ def main() -> None:
             raise FileNotFoundError("Build the membership-filtered market panel before running historical research.")
         raw_data = pd.read_csv(history_panel_path, dtype={"symbol": "string"})
     elif args.universe_date:
+        client = LixingerClient()
         constituents = client.fetch_index_constituents(INITIAL_UNIVERSE_INDEX, args.universe_date)
         stock_pool = build_index_stock_pool(constituents, INITIAL_UNIVERSE_INDEX, args.universe_date)
         stock_pool.to_csv(
@@ -183,6 +229,7 @@ def main() -> None:
         symbols = stock_pool["symbol"].tolist()
         raw_data = fetch_universe_daily_bars(symbols, args.start, args.end, client=client)
     else:
+        client = LixingerClient()
         symbols = normalize_symbols(args.symbols)
         raw_data = fetch_universe_daily_bars(symbols, args.start, args.end, client=client)
 
@@ -195,7 +242,7 @@ def main() -> None:
 
     factor_data = calculate_price_factors(clean_data)
     factor_data.to_csv(FACTOR_RAW_DIR / "price_factors.csv", index=False, encoding="utf-8-sig")
-    if not (args.with_preprocess or args.with_analysis or args.with_evaluation):
+    if not (args.with_preprocess or args.with_analysis or args.with_evaluation or args.with_backtest or args.with_execution_backtest):
         print("Base pipeline completed. Use --with-preprocess or --with-analysis for research outputs.")
         return
 
@@ -206,7 +253,43 @@ def main() -> None:
     build_preprocess_summary(factor_data, factor_columns).to_csv(
         REPORT_DIR / "preprocess_summary.csv", index=False, encoding="utf-8-sig"
     )
+    if args.with_backtest:
+        backtest = run_monthly_top_n_backtest(
+            factor_data,
+            PORTFOLIO_FACTOR_WEIGHTS,
+            args.horizon,
+            PORTFOLIO_TOP_N,
+        )
+        backtest.to_csv(
+            REPORT_DIR / f"portfolio_backtest_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        )
+        portfolio_summary = summarize_backtest(backtest)
+        portfolio_summary.to_csv(
+            REPORT_DIR / f"portfolio_backtest_summary_{args.horizon}d.csv",
+            index=False,
+            encoding="utf-8-sig",
+        )
+    if args.with_execution_backtest:
+        execution_path = MARKET_EXECUTION_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv"
+        if not execution_path.exists():
+            raise FileNotFoundError("Build the unadjusted execution panel before running the execution backtest.")
+        execution_bars = clean_daily_bars(pd.read_csv(execution_path, dtype={"symbol": "string"}))
+        execution_panel = add_next_open_execution_returns(factor_data, execution_bars, args.horizon)
+        execution_backtest = run_monthly_top_n_backtest(
+            execution_panel, PORTFOLIO_FACTOR_WEIGHTS, args.horizon, PORTFOLIO_TOP_N,
+            return_column="execution_return", one_way_cost_rate=PORTFOLIO_ONE_WAY_COST_RATE,
+        )
+        execution_backtest.to_csv(
+            REPORT_DIR / f"execution_backtest_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        )
+        summarize_backtest(execution_backtest).to_csv(
+            REPORT_DIR / f"execution_backtest_summary_{args.horizon}d.csv", index=False, encoding="utf-8-sig"
+        )
     if not (args.with_analysis or args.with_evaluation):
+        if args.with_backtest:
+            print("Portfolio research backtest completed.")
+            print(portfolio_summary.to_string(index=False))
+            return
         print("Preprocessing completed.")
         return
 

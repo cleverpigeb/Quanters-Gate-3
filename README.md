@@ -20,6 +20,10 @@
 
 每一阶段完成的标准不是“代码能跑”，而是研究结论、数据口径和限制条件都能被团队成员复现和解释。
 
+当前已经有一个最小的组合研究基线：每月最后一个可用交易日用预处理后的因子打分，选取 Top 30 等权持有，并使用未来 20 个可用交易日的收盘价收益评估。默认仅使用 20 日动量，权重和持仓数在 `config/settings.py` 配置；它的基准是当期可用股票池的等权收益，而非真实沪深 300 指数收益。
+
+这个模块用于验证“选股组合是否值得继续研究”，不是可交易回测：它仍以信号日收盘价开始计收益，未包含次日执行、交易成本、滑点、涨跌停、ST 和退市规则。上述约束会在后续可交易回测阶段加入。
+
 ## 团队分工
 
 - Quant researcher：提出因子假设、定义研究口径、判断 IC/分组结果、解释失效原因和决定下一步研究。
@@ -55,6 +59,7 @@ src/
   factor_preprocessor.py   # 截面 MAD 去极值、z-score、覆盖率报告
   ic_analyzer.py           # 未来收益与非重叠 Rank IC
   factor_evaluator.py      # 因子分组收益评估
+  portfolio_backtester.py  # 月度 Top N 等权组合研究回测
 data/
   universe/                 # 沪深 300 的点时成分股快照与历史表
   market/{raw,processed}/  # raw/by_symbol 支持断点续跑的逐股票日线缓存
@@ -111,6 +116,28 @@ uv run python run_all.py --run-market-history --with-evaluation
 ```
 
 这会复用本地历史面板，不再请求行情接口，并覆盖 `data/reports/` 中的因子研究报告。
+
+运行最小月度组合研究回测：
+
+```powershell
+uv run python run_all.py --run-market-history --with-backtest
+```
+
+输出 `portfolio_backtest_20d.csv` 和 `portfolio_backtest_summary_20d.csv`。前者按月记录组合、等权股票池基准、超额收益、持仓数与单边换手；后者汇总复利收益、年化收益、年化波动、最大回撤和平均换手。
+
+可交易口径使用单独的未复权执行价面板，先分批构建：
+
+```powershell
+uv run python run_all.py --build-execution-history
+```
+
+完成后运行：
+
+```powershell
+uv run python run_all.py --run-market-history --with-execution-backtest
+```
+
+该版本从信号日后的下一交易日开盘进入、持有 20 个交易日并于开盘退出，要求入场和退出日都有成交，并按 `PORTFOLIO_ONE_WAY_COST_RATE` 扣除单边成本。它仍未处理现金分红、涨跌停、ST、退市和实际委托成交，因此是执行口径研究的第一步，不是实盘证明。
 
 清洗层不会前填缺失行情。它会保留零成交记录并标记为 `is_tradable=False`，从而让后续股票池和回测模块决定如何处理停牌，而不是提前抹掉这一事实。
 

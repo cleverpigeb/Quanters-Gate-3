@@ -36,7 +36,7 @@ class DataFetcherTests(unittest.TestCase):
 
     def test_symbol_cache_skips_histories_that_cover_requested_range(self) -> None:
         class CacheClient:
-            def fetch_daily_bars(self, symbol, start_date, end_date):
+            def fetch_daily_bars(self, symbol, start_date, end_date, price_type):
                 return pd.DataFrame(
                     {
                         "date": ["2024-01-01T00:00:00+08:00", "2024-01-31T00:00:00+08:00"],

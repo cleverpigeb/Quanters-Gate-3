@@ -184,6 +184,7 @@ def cache_daily_bar_batch(
     cache_dir: str | Path,
     client: LixingerClient,
     max_symbols: int,
+    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
 ) -> dict[str, int]:
     """Cache a bounded number of missing symbol histories for resumable bulk retrieval."""
     if max_symbols <= 0:
@@ -197,7 +198,7 @@ def cache_daily_bar_batch(
     ]
     fetched = 0
     for symbol in missing[:max_symbols]:
-        bars = client.fetch_daily_bars(symbol, start_date, end_date)
+        bars = client.fetch_daily_bars(symbol, start_date, end_date, price_type)
         bars.to_csv(directory / f"{symbol}.csv", index=False, encoding="utf-8-sig")
         fetched += 1
     return {"total": len(symbols), "cached": len(symbols) - len(missing), "fetched": fetched, "remaining": len(missing) - fetched}
