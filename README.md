@@ -29,6 +29,7 @@ quanters_gate_3/
 │  ├─ paths.py                     # 项目数据路径的唯一来源
 │  ├─ dates.py                     # 上海交易日期标准化
 │  ├─ validation.py                # 共用输入校验
+│  ├─ provider.py                  # 行情数据源协议与工厂类型
 │  ├─ lixinger.py                  # 理杏仁 HTTP 客户端
 │  ├─ cache.py                     # 可续跑的逐股票缓存
 │  ├─ storage.py                   # 原子文件写入与内容校验
@@ -65,6 +66,7 @@ uv run pytest
 - 修改研究日期、预测周期、股票池、基准指数、调仓频率、评估参数、组合持仓数、成本率、随机种子或默认因子权重时，编辑 `config/default.toml`。
 - 新增或调整原始因子时，编辑 `src/quanters_gate/factors.py`，并同步检查 `PRICE_FACTOR_COLUMNS`、组合权重和对应测试。
 - 修改数据获取、缓存、清洗、收益或回测规则时，编辑职责对应的模块，不要把业务逻辑放入根目录 `main.py`。
+- 新增数据源时，实现 `provider.py` 中的协议，并只在应用入口选择具体实现；缓存和研究流程不得依赖供应商专用鉴权或 HTTP 细节。
 - 修改命令行参数时，编辑 `src/quanters_gate/cli.py`；跨模块执行顺序由 `src/quanters_gate/workflows.py` 管理。
 - 每次修改后运行 Ruff 和 pytest；涉及量化计算时，还要检查样本数量、缺失值、日期对齐和是否引入未来信息。
 
@@ -80,6 +82,10 @@ uv run pytest
 命令行中的 `--symbols`、`--start`、`--end`、`--horizon` 和两个批量参数仍可临时覆盖对应默认值。每次研究流程成功完成后，程序会将实际生效的参数、运行模式和功能开关原子写入 `data/reports/run_config.toml`，因此命令行覆盖值也能随结果保存。当前流程没有随机步骤，但配置仍显式保存随机种子，防止未来加入随机算法后失去复现依据。
 
 理杏仁 Token 不属于研究配置，禁止写入 `config/default.toml`，仍只能通过环境变量或未跟踪的 `.env` 文件提供。
+
+## 数据源边界
+
+`provider.py` 定义行情下载所需的结构化协议。`LixingerClient` 是当前唯一实现，由 `cli.py` 在应用启动时注入；缓存和研究流程只接收协议或数据源工厂。这样可以在测试中使用内存数据源，也可以在未来增加离线数据集或备用供应商，而不需要修改因子、收益和回测逻辑。
 
 ## 数据结构
 

@@ -5,11 +5,17 @@ from pathlib import Path
 import pandas as pd
 
 import quanters_gate.cache as cache_module
-from quanters_gate.cache import cache_daily_bar_batch, load_cached_daily_bars
+from quanters_gate.cache import (
+    cache_daily_bar_batch,
+    fetch_universe_daily_bars,
+    load_cached_daily_bars,
+)
 from quanters_gate.storage import calculate_sha256
 
 
 class CacheClient:
+    provider_name = "lixinger"
+
     def __init__(self) -> None:
         self.calls = 0
 
@@ -28,6 +34,20 @@ class CacheClient:
                 "price_type": [price_type, price_type],
             }
         )
+
+
+def test_fetch_universe_daily_bars_uses_injected_provider() -> None:
+    provider = CacheClient()
+
+    bars = fetch_universe_daily_bars(
+        ["000001", "000002"],
+        "2024-01-01",
+        "2024-01-31",
+        provider,
+    )
+
+    assert provider.calls == 2
+    assert bars["symbol"].tolist() == ["000001", "000001", "000002", "000002"]
 
 
 def test_cache_skips_histories_with_matching_coverage(tmp_path: Path) -> None:
@@ -98,6 +118,36 @@ def test_cache_refetches_when_requested_start_expands(tmp_path: Path) -> None:
 
     assert progress["fetched"] == 1
     assert client.calls == 2
+
+
+def test_cache_refetches_when_provider_changes(tmp_path: Path) -> None:
+    first_provider = CacheClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        first_provider,
+        1,
+    )
+
+    class OfflineProvider(CacheClient):
+        provider_name = "offline"
+
+    second_provider = OfflineProvider()
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        second_provider,
+        1,
+    )
+    metadata = json.loads((tmp_path / "000001.meta.json").read_text(encoding="utf-8"))
+
+    assert progress["fetched"] == 1
+    assert second_provider.calls == 1
+    assert metadata["provider"] == "offline"
 
 
 def test_cache_refetches_when_csv_price_type_disagrees_with_metadata(tmp_path: Path) -> None:

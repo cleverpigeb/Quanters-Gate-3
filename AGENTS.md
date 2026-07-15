@@ -18,6 +18,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `paths.py`: All project data paths.
 - `dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
 - `validation.py`: Shared input validation across modules.
+- `provider.py`: Provider protocols and the factory type used by data workflows.
 - `lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
 - `cache.py`: Per-security caches with auditable metadata and content-identity checks.
 - `storage.py`: Shared atomic CSV/JSON/text writers and SHA-256 file hashing.
@@ -51,6 +52,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - Do not restore the former `src.*` or `config.*` compatibility wrappers.
 - Do not reintroduce the removed AkShare moving-average exercise or the `akshare` and `matplotlib` dependencies.
 - Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to the Lixinger API.
+- `cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
 - Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
 - Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`.
 

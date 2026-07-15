@@ -1,6 +1,8 @@
 # 编排数据构建与研究流水线。
 
 from argparse import Namespace
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -20,7 +22,6 @@ from quanters_gate.evaluation import (
     summarize_top_bottom_spreads,
 )
 from quanters_gate.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
-from quanters_gate.lixinger import LixingerClient
 from quanters_gate.paths import (
     FACTOR_PROCESSED_DIR,
     FACTOR_RAW_DIR,
@@ -35,6 +36,7 @@ from quanters_gate.paths import (
 )
 from quanters_gate.portfolio import run_monthly_top_n_backtest, summarize_backtest
 from quanters_gate.preprocessing import build_preprocess_summary, preprocess_factors
+from quanters_gate.provider import MarketDataProvider, MarketDataProviderFactory
 from quanters_gate.returns import add_forward_returns, add_next_open_execution_returns
 from quanters_gate.settings import PROJECT_CONFIG, RunConfig, serialize_run_config
 from quanters_gate.storage import atomic_write_csv, atomic_write_text
@@ -111,12 +113,31 @@ def _write_run_config(config: RunConfig) -> None:
     atomic_write_text(serialize_run_config(config), REPORT_DIR / "run_config.toml")
 
 
-def build_universe_history(args: Namespace) -> None:
+@contextmanager
+def _provider_session(
+    provider_factory: MarketDataProviderFactory,
+) -> Iterator[MarketDataProvider]:
+    provider = provider_factory()
+    try:
+        if provider.provider_name != PROJECT_CONFIG.data.provider:
+            raise ValueError(
+                f"配置的数据源 {PROJECT_CONFIG.data.provider} 与注入的数据源 "
+                f"{provider.provider_name} 不一致。"
+            )
+        yield provider
+    finally:
+        provider.close()
+
+
+def build_universe_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
     # 分批构建月末指数成分历史。
     require_positive(args.max_universe_snapshots, "单批最大成分快照数")
     universe = PROJECT_CONFIG.universe
-    with LixingerClient() as client:
-        index_bars = client.fetch_index_daily_bars(
+    with _provider_session(provider_factory) as provider:
+        index_bars = provider.fetch_index_daily_bars(
             universe.index_code,
             args.start,
             args.end,
@@ -144,7 +165,7 @@ def build_universe_history(args: Namespace) -> None:
                 missing_dates.append(date)
 
         for date in missing_dates[: args.max_universe_snapshots]:
-            snapshot = client.fetch_index_constituents(
+            snapshot = provider.fetch_index_constituents(
                 universe.index_code,
                 date.strftime("%Y-%m-%d"),
             )
@@ -170,6 +191,7 @@ def _build_market_history(
     panel_dir: Path,
     price_type: str,
     label: str,
+    provider_factory: MarketDataProviderFactory,
 ) -> None:
     membership_path = _membership_path()
     if not membership_path.exists():
@@ -179,13 +201,13 @@ def _build_market_history(
     membership = pd.read_csv(membership_path, dtype={"symbol": "string"})
     require_columns(membership, ("as_of_date", "symbol"), "成分历史")
     symbols = normalize_symbols(sorted(membership["symbol"].dropna().unique().tolist()))
-    with LixingerClient() as client:
+    with _provider_session(provider_factory) as provider:
         progress = cache_daily_bar_batch(
             symbols,
             args.start,
             args.end,
             cache_dir,
-            client,
+            provider,
             args.max_market_symbols,
             price_type,
         )
@@ -202,7 +224,10 @@ def _build_market_history(
     print(f"已构建{label}：完整行情 {len(panel)} 行，其中信号日可选记录 {eligible_rows} 行。")
 
 
-def build_research_market_history(args: Namespace) -> None:
+def build_research_market_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
     # 构建复权研究行情的完整历史面板。
     _build_market_history(
         args,
@@ -210,10 +235,14 @@ def build_research_market_history(args: Namespace) -> None:
         MARKET_RAW_DIR,
         PROJECT_CONFIG.data.research_price_type,
         "研究行情",
+        provider_factory,
     )
 
 
-def build_execution_market_history(args: Namespace) -> None:
+def build_execution_market_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
     # 构建未复权执行行情的完整历史面板。
     _build_market_history(
         args,
@@ -221,6 +250,7 @@ def build_execution_market_history(args: Namespace) -> None:
         MARKET_EXECUTION_DIR,
         PROJECT_CONFIG.data.execution_price_type,
         "执行行情",
+        provider_factory,
     )
 
 
@@ -243,14 +273,17 @@ def _load_historical_panel() -> pd.DataFrame:
     return attach_membership_eligibility(panel, membership)
 
 
-def _load_pipeline_input(args: Namespace) -> pd.DataFrame:
+def _load_pipeline_input(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> pd.DataFrame:
     if args.run_market_history:
         return _load_historical_panel()
 
     if args.universe_date:
         universe = PROJECT_CONFIG.universe
-        with LixingerClient() as client:
-            constituents = client.fetch_index_constituents(
+        with _provider_session(provider_factory) as provider:
+            constituents = provider.fetch_index_constituents(
                 universe.index_code,
                 args.universe_date,
             )
@@ -267,17 +300,17 @@ def _load_pipeline_input(args: Namespace) -> pd.DataFrame:
                 stock_pool["symbol"].tolist(),
                 args.start,
                 args.end,
-                client=client,
+                provider=provider,
                 price_type=PROJECT_CONFIG.data.research_price_type,
             )
 
     symbols = normalize_symbols(args.symbols)
-    with LixingerClient() as client:
+    with _provider_session(provider_factory) as provider:
         return fetch_universe_daily_bars(
             symbols,
             args.start,
             args.end,
-            client=client,
+            provider=provider,
             price_type=PROJECT_CONFIG.data.research_price_type,
         )
 
@@ -345,10 +378,13 @@ def _run_execution_backtest(
     return summary
 
 
-def run_research_pipeline(args: Namespace) -> None:
+def run_research_pipeline(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
     # 运行行情清洗、因子、评估和组合研究。
     run_config = _resolve_run_config(args)
-    raw_data = _load_pipeline_input(args)
+    raw_data = _load_pipeline_input(args, provider_factory)
     _write_csv(raw_data, MARKET_RAW_DIR / "daily_bars.csv")
 
     clean_data = clean_daily_bars(raw_data)
@@ -437,18 +473,21 @@ def run_research_pipeline(args: Namespace) -> None:
         print("因子预处理已完成。")
 
 
-def execute(args: Namespace) -> None:
+def execute(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
     # 根据命令行参数选择唯一的主工作流。
     validate_date_range(args.start, args.end)
     require_positive(args.horizon, "未来收益周期")
     ensure_project_directories()
     if args.build_universe_history:
-        build_universe_history(args)
+        build_universe_history(args, provider_factory)
         return
     if args.build_market_history:
-        build_research_market_history(args)
+        build_research_market_history(args, provider_factory)
         return
     if args.build_execution_history:
-        build_execution_market_history(args)
+        build_execution_market_history(args, provider_factory)
         return
-    run_research_pipeline(args)
+    run_research_pipeline(args, provider_factory)

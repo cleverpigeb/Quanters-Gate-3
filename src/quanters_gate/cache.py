@@ -7,36 +7,29 @@ from pathlib import Path
 import pandas as pd
 
 from quanters_gate.dates import normalize_trade_dates
-from quanters_gate.lixinger import LixingerClient
+from quanters_gate.provider import DailyBarProvider
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
 CACHE_SCHEMA_VERSION = 1
-CACHE_PROVIDER = PROJECT_CONFIG.data.provider
 
 
 def fetch_universe_daily_bars(
     symbols: list[str],
     start_date: str,
     end_date: str,
-    client: LixingerClient | None = None,
+    provider: DailyBarProvider,
     price_type: str = PROJECT_CONFIG.data.research_price_type,
 ) -> pd.DataFrame:
     # 逐只获取行情，并保留其他请求成功的股票。
-    lixinger = client or LixingerClient()
-    owns_client = client is None
     frames: list[pd.DataFrame] = []
     failures: list[str] = []
-    try:
-        for symbol in symbols:
-            try:
-                frames.append(lixinger.fetch_daily_bars(symbol, start_date, end_date, price_type))
-            except Exception as error:
-                failures.append(f"{symbol}：{error}")
-    finally:
-        if owns_client:
-            lixinger.close()
+    for symbol in symbols:
+        try:
+            frames.append(provider.fetch_daily_bars(symbol, start_date, end_date, price_type))
+        except Exception as error:
+            failures.append(f"{symbol}：{error}")
 
     if not frames:
         details = "；".join(failures)
@@ -55,6 +48,7 @@ def _cache_covers_date_range(
     start_date: str,
     end_date: str,
     price_type: str,
+    provider_name: str,
 ) -> bool:
     metadata_path = _metadata_path(file_path)
     if not file_path.exists() or not metadata_path.exists():
@@ -68,7 +62,7 @@ def _cache_covers_date_range(
         cached_end = pd.Timestamp(metadata["requested_end"]).normalize()
         if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
             return False
-        if metadata.get("provider") != CACHE_PROVIDER:
+        if metadata.get("provider") != provider_name:
             return False
         if metadata.get("price_type") != price_type:
             return False
@@ -102,6 +96,7 @@ def _write_cache(
     start_date: str,
     end_date: str,
     price_type: str,
+    provider_name: str,
 ) -> None:
     require_columns(bars, ("date", "symbol", "price_type"), "行情缓存")
     if bars.empty:
@@ -121,7 +116,7 @@ def _write_cache(
 
     metadata = {
         "schema_version": CACHE_SCHEMA_VERSION,
-        "provider": CACHE_PROVIDER,
+        "provider": provider_name,
         "requested_start": start.strftime("%Y-%m-%d"),
         "requested_end": end.strftime("%Y-%m-%d"),
         "price_type": price_type,
@@ -137,7 +132,7 @@ def cache_daily_bar_batch(
     start_date: str,
     end_date: str,
     cache_dir: str | Path,
-    client: LixingerClient,
+    provider: DailyBarProvider,
     max_symbols: int,
     price_type: str = PROJECT_CONFIG.data.research_price_type,
 ) -> dict[str, int]:
@@ -155,19 +150,21 @@ def cache_daily_bar_batch(
             start_date,
             end_date,
             price_type,
+            provider.provider_name,
         )
     ]
     fetched = 0
     failures: list[str] = []
     for symbol in missing[:max_symbols]:
         try:
-            bars = client.fetch_daily_bars(symbol, start_date, end_date, price_type)
+            bars = provider.fetch_daily_bars(symbol, start_date, end_date, price_type)
             _write_cache(
                 bars,
                 directory / f"{symbol}.csv",
                 start_date,
                 end_date,
                 price_type,
+                provider.provider_name,
             )
             fetched += 1
         except Exception as error:

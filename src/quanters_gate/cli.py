@@ -4,6 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from quanters_gate.lixinger import LixingerClient
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.workflows import execute
 
@@ -97,7 +98,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     # 运行命令行入口。
     try:
-        execute(parse_args(argv))
+        execute(parse_args(argv), LixingerClient)
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"错误：{error}", file=sys.stderr)
         raise SystemExit(1) from None

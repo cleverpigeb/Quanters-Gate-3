@@ -8,12 +8,14 @@ import pytest
 from quanters_gate import workflows
 
 
-class EmptySnapshotClient:
-    def __enter__(self) -> EmptySnapshotClient:
-        return self
+class EmptySnapshotProvider:
+    provider_name = "lixinger"
 
-    def __exit__(self, *args: object) -> None:
-        return None
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
     def fetch_index_daily_bars(
         self,
@@ -32,7 +34,7 @@ def test_empty_downloaded_snapshot_is_not_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(workflows, "UNIVERSE_DIR", tmp_path)
-    monkeypatch.setattr(workflows, "LixingerClient", EmptySnapshotClient)
+    provider = EmptySnapshotProvider()
     args = Namespace(
         max_universe_snapshots=1,
         start="2024-01-01",
@@ -40,8 +42,9 @@ def test_empty_downloaded_snapshot_is_not_cached(
     )
 
     with pytest.raises(RuntimeError, match="成分快照为空"):
-        workflows.build_universe_history(args)
+        workflows.build_universe_history(args, lambda: provider)
 
+    assert provider.closed is True
     assert not (tmp_path / "000300_monthly_snapshots" / "2024-01-31.csv").exists()
 
 
@@ -77,3 +80,20 @@ def test_resolved_run_config_records_cli_overrides(
     assert saved["research"]["forward_days"] == 10
     assert saved["universe"]["symbols"] == ["000001", "600000"]
     assert saved["universe"]["market_fetch_batch_size"] == 4
+
+
+def test_workflow_rejects_provider_that_disagrees_with_config() -> None:
+    class MismatchedProvider(EmptySnapshotProvider):
+        provider_name = "offline"
+
+    provider = MismatchedProvider()
+    args = Namespace(
+        max_universe_snapshots=1,
+        start="2024-01-01",
+        end="2024-01-31",
+    )
+
+    with pytest.raises(ValueError, match="配置的数据源 lixinger 与注入的数据源 offline 不一致"):
+        workflows.build_universe_history(args, lambda: provider)
+
+    assert provider.closed is True

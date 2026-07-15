@@ -8,6 +8,7 @@ import pandas as pd
 import requests
 
 from quanters_gate.paths import PROJECT_ROOT
+from quanters_gate.provider import MarketDataProvider
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.validation import require_positive_finite, validate_date_range
 
@@ -16,8 +17,10 @@ LIXINGER_INDEX_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/index/candles
 LIXINGER_COMPANY_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/company/candlestick"
 
 
-class LixingerClient:
+class LixingerClient(MarketDataProvider):
     # 管理本项目所需的理杏仁请求、鉴权和响应校验。
+
+    provider_name = "lixinger"
 
     def __init__(
         self,
