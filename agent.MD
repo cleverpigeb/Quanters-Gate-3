@@ -1,79 +1,92 @@
-# Quanters' Gate 3 Agent Handoff
+# Quanters' Gate 3 AI Agent Handoff
 
-## 1. Project identity
+## Purpose
 
-This is a collaborative A-share individual-stock multi-factor research project. The final objective is a strategy suitable for cautious small-capital live trading after research, realistic backtesting, and paper-trading validation.
+This file exists solely to hand over project context, engineering constraints, and quantitative-correctness requirements to future AI agents. It is not a user guide, research report, or collaboration-process document. Before changing the project, an AI agent must read this file and `README.md`, then inspect the current code and tests instead of relying only on prior conversation history.
 
-Do not copy the index-rotation logic from `C:\Users\Hush\quant_learning`. It is a useful engineering reference only. This project must be designed around individual-stock issues: dynamic universe membership, ST/suspension/delisting rules, adjusted prices, financial-report publication dates, industry and market-cap exposures, and trading feasibility.
+## Project Scope
 
-## 2. Current state
+This project is a cross-sectional equity-factor research pipeline for mainland China A-shares. Its current research scope focuses on historical CSI 300 constituents, monthly signals, 20-trading-day forward returns, and equal-weighted Top N portfolios. The system is intended for testing research hypotheses; it is not a broker integration, automated execution system, or production-grade capital-management platform.
 
-- Working branch: `Hush`, tracking `origin/Hush`.
-- Default flow: `run_all.py` -> market fetch -> cleaning -> raw factors -> optional preprocessing -> non-overlapping Rank IC -> optional quantile returns.
-- Initial stock universe: point-in-time CSI 300 constituents from Lixinger. This is a snapshot interface, not yet the full historical dynamic universe needed for production backtests.
-- Monthly CSI 300 membership history is built from real CSI 300 trading dates, then one Lixinger constituent snapshot per month-end. It must be available before a full-universe historical backtest.
-- Universe snapshots are cached one month per CSV under `data/universe/` and built in small resumable batches. Do not replace this with aggressive parallel API requests.
-- Market history uses the same bounded, per-symbol cache under `data/market/raw/by_symbol/`. Only after every historical constituent has a complete price file does the pipeline create the membership-filtered panel.
-- Cache coverage checks normalize provider timestamps to timezone-naive Shanghai dates before comparing against the configured research range.
-- Read cached `symbol` columns with an explicit string dtype; otherwise leading-zero A-share codes fail to match membership history.
-- Apply membership by the global latest month-end snapshot for each market date, then exact-match symbols within that snapshot. Never as-of merge membership separately by symbol, because it incorrectly retains stocks after they leave the index.
-- The local 2021-01-29 to 2026-06-30 membership build completed with 66 snapshots and 19,800 rows. Every snapshot has 300 symbols; the first and last snapshots differ by 200 codes.
-- The completed membership-filtered market panel has 392,238 eligible daily bars across 458 symbols. Most days have 300 names; the minimum is 296 because a small number of member-day observations have no usable quote.
-- The first full CSI 300 research run completed with 64 non-overlapping 20-day observations and median cross-section size 300. The four initial raw factors are weak diagnostics only; none is ready to enter a trading strategy without further validation.
-- The monthly history contains 459 unique symbols across the full period, and the local per-symbol market cache is complete. The cache remains local because the membership-filtered panel is the smaller reproducible input needed for research.
-- Lixinger integration was live-checked with the local token: `cn/index/constituents` uses `stockCodes: ["000300"]`; `cn/company/candlestick` uses `stockCode`, `type: "day"`, `startDate`, and `endDate`.
-- Market cleaning validates prices and OHLC ranges, removes duplicate `(date, symbol)` rows by retaining the latest response, and preserves zero-activity bars as `is_tradable=False`.
-- The cleaner normalizes provider timestamps to timezone-naive Shanghai trading dates before any cross-source merge.
-- Current factors: 20-day momentum, 5-day reversal, 20-day volatility, and a liquidity proxy.
-- All 20-day factors require a full 20-trading-day lookback. Do not fill warm-up observations just to enlarge an analysis sample.
-- Preprocessing applies MAD winsorization and z-score separately on each trading-date cross-section, while preserving missing factor values.
-- IC analysis uses close-to-close forward returns and samples every `IC_SAMPLE_STEP` trading dates to avoid overlapping forward-return windows. Never shift factor values forward to manufacture an IC result.
-- Quantile evaluation is equal-weighted and sampled every `IC_SAMPLE_STEP` dates. Its output is a factor diagnostic, not a transaction-cost-aware strategy backtest.
-- The minimal portfolio research backtest is implemented in `src/portfolio_backtester.py`. It takes month-end signals, selects an equal-weighted Top N portfolio, and compares its forward return with the equal-weighted eligible universe. Defaults belong in `PORTFOLIO_FACTOR_WEIGHTS` and `PORTFOLIO_TOP_N`.
-- Its current return starts at the signal-date close and uses the existing future-N-available-bar return. It intentionally excludes execution delay, costs, price limits, ST/delisting rules, and cap-weighted index benchmarking. Never present its outputs as tradeable or live-strategy performance.
-- The first full-panel momentum-only Top 30 research run has 63 monthly observations: 47.79% portfolio total return versus 21.20% equal-weight-universe benchmark, but -53.94% maximum drawdown and 83.97% mean one-way turnover. It is a starting diagnostic, not a validated alpha result.
-- The next execution layer has a separate `data/market/execution/` cache and panel, fetched as `ex_rights` through `--build-execution-history`. `src/execution_returns.py` maps factor-date signals to the next available open and the open after the configured holding horizon; both must be tradable.
-- `--with-execution-backtest` refuses to use adjusted execution prices and applies the configurable `PORTFOLIO_ONE_WAY_COST_RATE`. It is not yet runnable until the unadjusted execution panel is built, and it still excludes cash dividends, price limits, ST/delisting rules, and real order fills.
-- A five-stock end-to-end run for 2021-01-04 to 2026-06-30 completed successfully. Treat it only as a pipeline smoke test; five names are far too few for an alpha conclusion.
-- `main.py` is a separate single-stock moving-average exercise. Preserve it unless the user explicitly asks to change it.
-- `data/` is ignored by default. The explicit shared-data exception is the versioned CSI 300 snapshot: `data/universe/000300_ME_membership.csv`, `data/market/raw/000300_ME_panel.csv`, and `data/reports/*.csv`. Do not commit API tokens, `.env`, per-symbol caches, or regenerable cleaning/factor intermediates without explicit agreement.
+The only entry point is the root-level `main.py`, which calls `quanters_gate.cli.main`. Implementation code lives in `src/quanters_gate/`, and tests live in `tests/`. The environment, project installation, dependencies, and lockfile are managed through uv.
 
-## 3. Engineering rules
+## Module Responsibilities
 
-1. Keep the project structured and immediately understandable to collaborators.
-2. Before every push, update both `README.md` and `agent.MD` when project status, structure, commands, decisions, or handoff information changed. A no-op wording review is enough when neither document needs a factual change.
-3. Keep modules concise. Do not add duplicated helpers, dead code, unused compatibility layers, or overlapping modules.
-4. Favor extension through configuration and clear interfaces. The project should grow from a small CSI 300 factor set to broader universes, more factors, and more research stages without rewriting the pipeline.
-5. Use `config/settings.py` for research parameters and `config/paths.py` as the single source of project paths. Keep core production logic in `src/`; put exploratory work in `notebooks/`.
-6. Do not introduce a new top-level directory without a concrete business reason and an explanation in README.
-7. Preserve user and teammate changes. Never reset, overwrite, or remove unrelated work.
+- `cli.py`: Chinese-language CLI, argument defaults, and validation of mutually exclusive primary modes.
+- `workflows.py`: Orchestration for constituent history, research prices, execution prices, and research workflows.
+- `settings.py`: Research parameters and Lixinger API constants.
+- `paths.py`: All project data paths.
+- `dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
+- `validation.py`: Shared input validation across modules.
+- `lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
+- `cache.py`: Per-security caches with requested-range and price-type metadata.
+- `cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
+- `universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
+- `factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
+- `preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
+- `returns.py`: Forward close-to-close returns and next-open execution returns.
+- `evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
+- `portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
 
-## 4. Research correctness rules
+## Quantitative Constraints That Must Not Be Violated
 
-- Factors must only use information available on the factor date.
-- Never backfill a full historical test with one current CSI 300 constituent snapshot; that creates survivorship bias.
-- Financial data becomes usable on its publication date, not the accounting period end date.
-- Rank IC with an N-day forward return should use non-overlapping or explicitly adjusted samples; otherwise overlapping windows exaggerate stability.
-- A positive backtest alone is insufficient. Check costs, slippage, turnover, suspensions, price limits, delistings, and sample-out performance.
-- The cleaner must not forward-fill price bars or discard a zero-volume bar merely to make a panel rectangular; tradability is a later business decision.
-- A negative IC can still be useful if it is stable and its sign is explicitly reversed before combination.
-- Start with simple, explainable equal-weight factor combinations before complex models.
+1. Factors may use only information available on or before the signal date.
+2. Historical index membership determines only whether a security may be newly selected on a signal date.
+3. Complete security-level price histories must be retained for factor lookback before index inclusion and portfolio valuation after index removal.
+4. Factors and forward returns must be calculated on each security's complete history before filtering signals by `eligible_on_signal_date=True`.
+5. Current constituents must never be used to backfill the historical universe.
+6. Research returns use `lxr_fc_rights` forward-adjusted prices; execution returns accept only `ex_rights` unadjusted prices.
+7. Missing market data must not be forward-filled, and zero-turnover records must not be removed to fabricate continuous trading.
+8. IC and quantile evaluation for N-day forward returns must use non-overlapping samples or an explicitly justified statistical correction.
+9. A factor must remain missing when its complete lookback window is unavailable.
+10. Positive returns alone do not establish strategy validity; drawdown, turnover, costs, and out-of-sample stability must also be reviewed.
+11. Monthly fixed-horizon return windows may overlap or leave gaps because adjacent month ends are not always exactly 20 trading days apart. Current compounded backtest summaries are research diagnostics, not a strict self-financing NAV, and must not be presented as realizable performance.
 
-## 4.1 Lixinger implementation notes
+## Engineering Constraints
 
-- Use a request header of `Accept-Encoding: gzip`; requests without it receive a validation error from the API.
-- Read `LIXINGER_TOKEN` from the environment or this project's local `.env`, never from a hard-coded value or another repository path.
-- Research bars use Lixinger front-adjusted `lxr_fc_rights`, which includes dividend reinvestment. Execution work must explicitly request unadjusted `ex_rights` prices; never use an adjusted price as a simulated fill price.
+- All code comments, docstrings, exception messages, CLI help text, and ordinary runtime messages must use Simplified Chinese.
+- Python identifiers, CSV field names, command-line options, and external API fields must retain stable English names.
+- Shared logic should be placed in the existing module with the appropriate responsibility. Do not duplicate date normalization, column validation, or file-writing logic.
+- Do not restore the former `src.*` or `config.*` compatibility wrappers.
+- Do not reintroduce the removed AkShare moving-average exercise or the `akshare` and `matplotlib` dependencies.
+- Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to the Lixinger API.
+- Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
+- Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`.
 
-## 5. Git workflow
+## Data Cache Contract
 
-1. Start with `git switch Hush` and `git pull origin Hush`.
-2. Inspect `git status` before editing and before committing.
-3. Keep each commit scoped and explainable.
-4. Before push: run relevant checks, review `git diff --cached --check`, and update README/agent.MD as required above.
-5. Do not commit or push merely because code changes are complete. Wait for explicit user authorization to commit and/or push after the user has reviewed the local changes.
-6. When explicitly authorized, push to `origin Hush`. Merge to `main` through a Pull Request when the team agrees.
+Every per-security CSV must have a matching `.meta.json` file containing:
 
-## 6. Suggested next research milestone
+- `requested_start`
+- `requested_end`
+- `price_type`
 
-Add explicit investability filters and an execution-aware portfolio return model before adding many more factors. The next strategy target is: CSI 300, monthly rebalance, 20-trading-day horizon, a small set of interpretable factors, Top N equal-weight holdings, next-trading-day execution, and a transaction-cost-aware benchmark comparison.
+A cache may be reused only when its metadata covers the requested interval, its price type matches the request, and its non-empty CSV contains only valid trading dates. Every CSV row must also match the security encoded by the filename and the requested price type. Legacy caches without metadata must be fetched again.
+
+## Current Data-Migration State
+
+The tracked `data/market/raw/000300_ME_panel.csv` is a legacy constituent-filtered panel. It lacks complete prices before index inclusion and after index removal, and it does not contain a native eligibility column. For compatibility, the current code temporarily adds an eligibility column when reading this file and emits a warning, but it cannot recover prices that were already discarded.
+
+The audited membership history contains 459 unique securities, while the legacy market panel contains 458. Security `688072` appears in the final membership snapshot but has no row in the shared market panel. The tracked `portfolio_backtest_20d.csv` also predates the current report schema and lacks the `gross_portfolio_return` and `transaction_cost` columns.
+
+Corrected shared data and reports can be rebuilt only when a Lixinger token is available, using this sequence:
+
+```powershell
+uv run python main.py --build-universe-history
+uv run python main.py --build-market-history
+uv run python main.py --run-market-history --with-evaluation --with-backtest
+```
+
+The market-history build command must be rerun until all per-security caches are complete. Existing reports use the legacy data convention and must not be represented as reflecting the corrected index-removal treatment.
+
+## Development Validation
+
+After every code change, run at least:
+
+```powershell
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
+For changes to research calculations, also compare output row counts, fields, ordering, numerical differences, and runtime against the complete shared panel. Performance improvements must not reduce the valid sample, alter missing-value rules, or lower calculation precision.

@@ -1,0 +1,190 @@
+"""管理可续跑的逐股票行情缓存。"""
+
+import json
+from pathlib import Path
+
+import pandas as pd
+
+from quanters_gate.dates import normalize_trade_dates
+from quanters_gate.lixinger import LixingerClient
+from quanters_gate.settings import LIXINGER_RESEARCH_PRICE_TYPE
+from quanters_gate.validation import require_columns, require_positive, validate_date_range
+
+
+def fetch_universe_daily_bars(
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    client: LixingerClient | None = None,
+    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+) -> pd.DataFrame:
+    """逐只获取行情，并保留其他请求成功的股票。"""
+    lixinger = client or LixingerClient()
+    owns_client = client is None
+    frames: list[pd.DataFrame] = []
+    failures: list[str] = []
+    try:
+        for symbol in symbols:
+            try:
+                frames.append(lixinger.fetch_daily_bars(symbol, start_date, end_date, price_type))
+            except Exception as error:
+                failures.append(f"{symbol}：{error}")
+    finally:
+        if owns_client:
+            lixinger.close()
+
+    if not frames:
+        details = "；".join(failures)
+        raise RuntimeError(f"未能获取任何股票行情。{details}")
+    if failures:
+        print("以下股票获取失败，已跳过：" + "；".join(failures))
+    return pd.concat(frames, ignore_index=True)
+
+
+def _metadata_path(file_path: Path) -> Path:
+    return file_path.with_suffix(".meta.json")
+
+
+def _cache_covers_date_range(
+    file_path: Path,
+    start_date: str,
+    end_date: str,
+    price_type: str,
+) -> bool:
+    metadata_path = _metadata_path(file_path)
+    if not file_path.exists() or not metadata_path.exists():
+        return False
+
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        requested_start = pd.Timestamp(start_date).normalize()
+        requested_end = pd.Timestamp(end_date).normalize()
+        cached_start = pd.Timestamp(metadata["requested_start"]).normalize()
+        cached_end = pd.Timestamp(metadata["requested_end"]).normalize()
+        if metadata.get("price_type") != price_type:
+            return False
+        if cached_start > requested_start or cached_end < requested_end:
+            return False
+
+        cached = pd.read_csv(
+            file_path,
+            usecols=["date", "symbol", "price_type"],
+            dtype={"symbol": "string", "price_type": "string"},
+        )
+        if cached.empty:
+            return False
+        dates = normalize_trade_dates(cached["date"])
+        symbols_match = cached["symbol"].notna().all() and cached["symbol"].eq(file_path.stem).all()
+        price_types_match = (
+            cached["price_type"].notna().all() and cached["price_type"].eq(price_type).all()
+        )
+        return bool(dates.notna().all() and symbols_match and price_types_match)
+    except KeyError, OSError, ValueError, json.JSONDecodeError, pd.errors.ParserError:
+        return False
+
+
+def _write_cache(
+    bars: pd.DataFrame,
+    file_path: Path,
+    start_date: str,
+    end_date: str,
+    price_type: str,
+) -> None:
+    require_columns(bars, ("date", "symbol", "price_type"), "行情缓存")
+    if bars.empty:
+        raise ValueError("不能写入空的行情缓存。")
+    start, end = validate_date_range(start_date, end_date)
+    symbols = bars["symbol"].astype("string")
+    price_types = bars["price_type"].astype("string")
+    if symbols.isna().any() or not symbols.eq(file_path.stem).all():
+        raise ValueError(f"行情缓存包含不属于股票 {file_path.stem} 的记录。")
+    if price_types.isna().any() or not price_types.eq(price_type).all():
+        raise ValueError("行情缓存的价格口径与请求不一致。")
+    if not normalize_trade_dates(bars["date"]).notna().any():
+        raise ValueError("行情缓存没有有效交易日期。")
+
+    csv_temp = file_path.with_suffix(".csv.tmp")
+    metadata_path = _metadata_path(file_path)
+    metadata_temp = metadata_path.with_suffix(".json.tmp")
+
+    bars.to_csv(csv_temp, index=False, encoding="utf-8-sig")
+    csv_temp.replace(file_path)
+
+    metadata = {
+        "requested_start": start.strftime("%Y-%m-%d"),
+        "requested_end": end.strftime("%Y-%m-%d"),
+        "price_type": price_type,
+    }
+    metadata_temp.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    metadata_temp.replace(metadata_path)
+
+
+def cache_daily_bar_batch(
+    symbols: list[str],
+    start_date: str,
+    end_date: str,
+    cache_dir: str | Path,
+    client: LixingerClient,
+    max_symbols: int,
+    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+) -> dict[str, int]:
+    """缓存有限数量的缺失行情，使批量获取可以安全续跑。"""
+    require_positive(max_symbols, "单批最大股票数")
+    validate_date_range(start_date, end_date)
+    directory = Path(cache_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    missing = [
+        symbol
+        for symbol in symbols
+        if not _cache_covers_date_range(
+            directory / f"{symbol}.csv",
+            start_date,
+            end_date,
+            price_type,
+        )
+    ]
+    fetched = 0
+    failures: list[str] = []
+    for symbol in missing[:max_symbols]:
+        try:
+            bars = client.fetch_daily_bars(symbol, start_date, end_date, price_type)
+            _write_cache(
+                bars,
+                directory / f"{symbol}.csv",
+                start_date,
+                end_date,
+                price_type,
+            )
+            fetched += 1
+        except Exception as error:
+            failures.append(f"{symbol}：{error}")
+
+    if failures:
+        print("以下股票缓存失败，本批已继续处理其他股票：" + "；".join(failures))
+
+    return {
+        "total": len(symbols),
+        "cached": len(symbols) - len(missing),
+        "fetched": fetched,
+        "failed": len(failures),
+        "remaining": len(missing) - fetched,
+    }
+
+
+def load_cached_daily_bars(cache_dir: str | Path, symbols: list[str]) -> pd.DataFrame:
+    """将逐股票缓存合并为长表。"""
+    if not symbols:
+        raise ValueError("缓存股票列表不能为空。")
+    directory = Path(cache_dir)
+    missing = [symbol for symbol in symbols if not (directory / f"{symbol}.csv").exists()]
+    if missing:
+        raise FileNotFoundError(f"仍缺少 {len(missing)} 只股票的行情缓存。")
+
+    frames = [
+        pd.read_csv(directory / f"{symbol}.csv", dtype={"symbol": "string"}) for symbol in symbols
+    ]
+    return pd.concat(frames, ignore_index=True)
