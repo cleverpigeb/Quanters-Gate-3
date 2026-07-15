@@ -18,12 +18,14 @@ Quanters' Gate 3 是面向 A 股个股的多因子研究项目。项目以沪深
 ```text
 quanters_gate_3/
 ├─ main.py                         # 唯一项目入口
+├─ config/
+│  └─ default.toml                 # 版本化的研究与回测默认配置
 ├─ pyproject.toml                  # 项目、依赖、pytest 与 Ruff 配置
 ├─ uv.lock                         # uv 锁定的完整依赖版本
 ├─ src/quanters_gate/
 │  ├─ cli.py                       # 中文命令行界面与互斥模式校验
 │  ├─ workflows.py                 # 数据构建和研究流程编排
-│  ├─ settings.py                  # 研究参数和外部接口常量
+│  ├─ settings.py                  # TOML 配置读取、校验和接口常量
 │  ├─ paths.py                     # 项目数据路径的唯一来源
 │  ├─ dates.py                     # 上海交易日期标准化
 │  ├─ validation.py                # 共用输入校验
@@ -60,11 +62,24 @@ uv run pytest
 
 ## 修改项目
 
-- 修改研究日期、预测周期、组合持仓数、成本率或默认因子权重时，编辑 `src/quanters_gate/settings.py`。
+- 修改研究日期、预测周期、股票池、基准指数、调仓频率、评估参数、组合持仓数、成本率、随机种子或默认因子权重时，编辑 `config/default.toml`。
 - 新增或调整原始因子时，编辑 `src/quanters_gate/factors.py`，并同步检查 `PRICE_FACTOR_COLUMNS`、组合权重和对应测试。
 - 修改数据获取、缓存、清洗、收益或回测规则时，编辑职责对应的模块，不要把业务逻辑放入根目录 `main.py`。
 - 修改命令行参数时，编辑 `src/quanters_gate/cli.py`；跨模块执行顺序由 `src/quanters_gate/workflows.py` 管理。
 - 每次修改后运行 Ruff 和 pytest；涉及量化计算时，还要检查样本数量、缺失值、日期对齐和是否引入未来信息。
+
+## 项目配置
+
+`config/default.toml` 是版本控制内唯一的研究默认配置，并通过 `schema_version` 明确配置格式版本。程序启动时只读该文件并进行校验，不会重写或格式化它；修改后的值会在下一次运行中实际生效。它记录以下内容：
+
+- `research`：研究区间、未来收益周期、IC 抽样步长、分组数和随机种子。
+- `universe`：默认股票列表、基准指数、调仓频率和下载批量。
+- `data`：数据来源、研究价格口径和执行价格口径。
+- `portfolio`：持仓数量、单边成本率和因子权重。
+
+命令行中的 `--symbols`、`--start`、`--end`、`--horizon` 和两个批量参数仍可临时覆盖对应默认值。每次研究流程成功完成后，程序会将实际生效的参数、运行模式和功能开关原子写入 `data/reports/run_config.toml`，因此命令行覆盖值也能随结果保存。当前流程没有随机步骤，但配置仍显式保存随机种子，防止未来加入随机算法后失去复现依据。
+
+理杏仁 Token 不属于研究配置，禁止写入 `config/default.toml`，仍只能通过环境变量或未跟踪的 `.env` 文件提供。
 
 ## 数据结构
 

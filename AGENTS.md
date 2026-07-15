@@ -14,13 +14,13 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 
 - `cli.py`: Chinese-language CLI, argument defaults, and validation of mutually exclusive primary modes.
 - `workflows.py`: Orchestration for constituent history, research prices, execution prices, and research workflows.
-- `settings.py`: Research parameters and Lixinger API constants.
+- `settings.py`: Typed loading and validation of the versioned TOML configuration, plus Lixinger API constants.
 - `paths.py`: All project data paths.
 - `dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
 - `validation.py`: Shared input validation across modules.
 - `lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
 - `cache.py`: Per-security caches with auditable metadata and content-identity checks.
-- `storage.py`: Shared atomic CSV/JSON writers and SHA-256 file hashing.
+- `storage.py`: Shared atomic CSV/JSON/text writers and SHA-256 file hashing.
 - `cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
 - `universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
 - `factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
@@ -53,6 +53,12 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to the Lixinger API.
 - Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
 - Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`.
+
+## Configuration Contract
+
+The `config/default.toml` file is the single version-controlled source of research defaults and includes an explicit `schema_version`. It is opened read-only and validated at process startup; normal execution must never rewrite, normalize, or format this authoritative input. The loader contains no fallback research parameters. It records the research interval, forward-return and evaluation parameters, random seed, default symbols, benchmark index, rebalance frequency, download batch sizes, data provider, price conventions, portfolio size, transaction cost, and factor weights.
+
+Command-line values may temporarily override the supported date, symbol, horizon, and batch-size defaults. After a successful research run, the fully resolved configuration and run-mode flags must be atomically saved as `data/reports/run_config.toml`; this artifact must contain the effective overrides rather than a copy of defaults. Secrets must never be stored in TOML: the Lixinger token remains an environment or untracked `.env` value. `settings.py` must reject malformed, incomplete, unsupported, or quantitatively unsafe configuration instead of silently falling back to hidden constants.
 
 ## Data Cache Contract
 

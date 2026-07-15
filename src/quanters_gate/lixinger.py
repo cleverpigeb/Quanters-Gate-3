@@ -8,13 +8,12 @@ import pandas as pd
 import requests
 
 from quanters_gate.paths import PROJECT_ROOT
-from quanters_gate.settings import (
-    LIXINGER_COMPANY_CANDLESTICK_URL,
-    LIXINGER_INDEX_CANDLESTICK_URL,
-    LIXINGER_INDEX_CONSTITUENTS_URL,
-    LIXINGER_RESEARCH_PRICE_TYPE,
-)
+from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.validation import require_positive_finite, validate_date_range
+
+LIXINGER_INDEX_CONSTITUENTS_URL = "https://open.lixinger.com/api/cn/index/constituents"
+LIXINGER_INDEX_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/index/candlestick"
+LIXINGER_COMPANY_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/company/candlestick"
 
 
 class LixingerClient:
@@ -153,7 +152,7 @@ class LixingerClient:
         symbol: str,
         start_date: str,
         end_date: str,
-        price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+        price_type: str = PROJECT_CONFIG.data.research_price_type,
     ) -> pd.DataFrame:
         # 按明确的价格口径获取个股日线。
         start, end = validate_date_range(start_date, end_date)

@@ -1,0 +1,33 @@
+schema_version = 1
+
+# 研究区间、评估参数与复现设置。
+[research]
+start_date = 2021-01-01
+end_date = 2026-06-30
+forward_days = 20
+ic_sample_step = 20
+quantile_count = 5
+random_seed = 42
+
+# 默认股票列表、基准指数与数据构建批量。
+[universe]
+symbols = ["000001", "000002", "000063", "000333", "600000"]
+index_code = "000300"
+index_name = "沪深 300"
+rebalance_frequency = "ME"
+snapshot_batch_size = 12
+market_fetch_batch_size = 12
+
+# 数据来源与研究、执行价格口径。
+[data]
+provider = "lixinger"
+research_price_type = "lxr_fc_rights"
+execution_price_type = "ex_rights"
+
+# 组合构建与单边交易成本。
+[portfolio]
+top_n = 30
+one_way_cost_rate = 0.001
+
+[portfolio.factor_weights]
+momentum_20d = 1.0

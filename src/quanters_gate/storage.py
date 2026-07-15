@@ -34,14 +34,23 @@ def atomic_write_csv(
 
 def atomic_write_json(data: Mapping[str, object], path: str | Path) -> None:
     # 先写入同目录临时文件，再原子替换目标 JSON。
+    atomic_write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        path,
+    )
+
+
+def atomic_write_text(
+    content: str,
+    path: str | Path,
+    encoding: str = "utf-8",
+) -> None:
+    # 先写入同目录临时文件，再原子替换目标文本文件。
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = _temporary_path(target)
     try:
-        temporary.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temporary.write_text(content, encoding=encoding)
         os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)

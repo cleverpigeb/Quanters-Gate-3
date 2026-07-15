@@ -8,12 +8,12 @@ import pandas as pd
 
 from quanters_gate.dates import normalize_trade_dates
 from quanters_gate.lixinger import LixingerClient
-from quanters_gate.settings import LIXINGER_RESEARCH_PRICE_TYPE
+from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
 CACHE_SCHEMA_VERSION = 1
-CACHE_PROVIDER = "lixinger"
+CACHE_PROVIDER = PROJECT_CONFIG.data.provider
 
 
 def fetch_universe_daily_bars(
@@ -21,7 +21,7 @@ def fetch_universe_daily_bars(
     start_date: str,
     end_date: str,
     client: LixingerClient | None = None,
-    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+    price_type: str = PROJECT_CONFIG.data.research_price_type,
 ) -> pd.DataFrame:
     # 逐只获取行情，并保留其他请求成功的股票。
     lixinger = client or LixingerClient()
@@ -139,7 +139,7 @@ def cache_daily_bar_batch(
     cache_dir: str | Path,
     client: LixingerClient,
     max_symbols: int,
-    price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
+    price_type: str = PROJECT_CONFIG.data.research_price_type,
 ) -> dict[str, int]:
     # 缓存有限数量的缺失行情，使批量获取可以安全续跑。
     require_positive(max_symbols, "单批最大股票数")

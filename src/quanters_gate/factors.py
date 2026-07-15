@@ -6,6 +6,12 @@ import pandas as pd
 from quanters_gate.validation import require_columns
 
 REQUIRED_COLUMNS = ("date", "symbol", "close", "amount")
+PRICE_FACTOR_COLUMNS = (
+    "momentum_20d",
+    "reversal_5d",
+    "volatility_20d",
+    "turnover_proxy_20d",
+)
 
 
 def calculate_price_factors(data: pd.DataFrame) -> pd.DataFrame:

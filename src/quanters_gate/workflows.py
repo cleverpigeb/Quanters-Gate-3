@@ -1,6 +1,7 @@
 # 编排数据构建与研究流水线。
 
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -18,7 +19,7 @@ from quanters_gate.evaluation import (
     summarize_rank_ic,
     summarize_top_bottom_spreads,
 )
-from quanters_gate.factors import calculate_price_factors
+from quanters_gate.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
 from quanters_gate.lixinger import LixingerClient
 from quanters_gate.paths import (
     FACTOR_PROCESSED_DIR,
@@ -35,19 +36,8 @@ from quanters_gate.paths import (
 from quanters_gate.portfolio import run_monthly_top_n_backtest, summarize_backtest
 from quanters_gate.preprocessing import build_preprocess_summary, preprocess_factors
 from quanters_gate.returns import add_forward_returns, add_next_open_execution_returns
-from quanters_gate.settings import (
-    IC_SAMPLE_STEP,
-    INITIAL_UNIVERSE_INDEX,
-    LIXINGER_EXECUTION_PRICE_TYPE,
-    LIXINGER_RESEARCH_PRICE_TYPE,
-    PORTFOLIO_FACTOR_WEIGHTS,
-    PORTFOLIO_ONE_WAY_COST_RATE,
-    PORTFOLIO_TOP_N,
-    PRICE_FACTOR_COLUMNS,
-    QUANTILE_COUNT,
-    REBALANCE_FREQUENCY,
-)
-from quanters_gate.storage import atomic_write_csv
+from quanters_gate.settings import PROJECT_CONFIG, RunConfig, serialize_run_config
+from quanters_gate.storage import atomic_write_csv, atomic_write_text
 from quanters_gate.universe import (
     ELIGIBILITY_COLUMN,
     attach_membership_eligibility,
@@ -63,28 +53,76 @@ CSV_ENCODING = "utf-8-sig"
 
 
 def _membership_path() -> Path:
-    return UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_membership.csv"
+    universe = PROJECT_CONFIG.universe
+    return UNIVERSE_DIR / f"{universe.index_code}_{universe.rebalance_frequency}_membership.csv"
 
 
 def _history_panel_path(directory: Path) -> Path:
-    return directory / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv"
+    universe = PROJECT_CONFIG.universe
+    return directory / f"{universe.index_code}_{universe.rebalance_frequency}_panel.csv"
 
 
 def _write_csv(data: pd.DataFrame, path: Path) -> None:
     atomic_write_csv(data, path, encoding=CSV_ENCODING)
 
 
+def _resolve_run_config(args: Namespace) -> RunConfig:
+    if args.run_market_history:
+        mode = "historical_market"
+    elif args.universe_date:
+        mode = "universe_snapshot"
+    else:
+        mode = "symbols"
+    return RunConfig(
+        schema_version=PROJECT_CONFIG.schema_version,
+        mode=mode,
+        universe_date=args.universe_date,
+        with_preprocess=any(
+            (
+                args.with_preprocess,
+                args.with_analysis,
+                args.with_evaluation,
+                args.with_backtest,
+                args.with_execution_backtest,
+            )
+        ),
+        with_analysis=args.with_analysis or args.with_evaluation,
+        with_evaluation=args.with_evaluation,
+        with_backtest=args.with_backtest,
+        with_execution_backtest=args.with_execution_backtest,
+        research=replace(
+            PROJECT_CONFIG.research,
+            start_date=args.start,
+            end_date=args.end,
+            forward_days=args.horizon,
+        ),
+        universe=replace(
+            PROJECT_CONFIG.universe,
+            symbols=tuple(args.symbols),
+            snapshot_batch_size=args.max_universe_snapshots,
+            market_fetch_batch_size=args.max_market_symbols,
+        ),
+        data=PROJECT_CONFIG.data,
+        portfolio=PROJECT_CONFIG.portfolio,
+    )
+
+
+def _write_run_config(config: RunConfig) -> None:
+    atomic_write_text(serialize_run_config(config), REPORT_DIR / "run_config.toml")
+
+
 def build_universe_history(args: Namespace) -> None:
     # 分批构建月末指数成分历史。
     require_positive(args.max_universe_snapshots, "单批最大成分快照数")
+    universe = PROJECT_CONFIG.universe
     with LixingerClient() as client:
         index_bars = client.fetch_index_daily_bars(
-            INITIAL_UNIVERSE_INDEX,
+            universe.index_code,
             args.start,
             args.end,
         )
         rebalancing_dates = monthly_rebalance_dates(index_bars["date"])
-        snapshot_dir = UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_monthly_snapshots"
+        snapshot_dir = UNIVERSE_DIR / f"{universe.index_code}_monthly_snapshots"
         snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         snapshots: dict[pd.Timestamp, pd.DataFrame] = {}
@@ -107,7 +145,7 @@ def build_universe_history(args: Namespace) -> None:
 
         for date in missing_dates[: args.max_universe_snapshots]:
             snapshot = client.fetch_index_constituents(
-                INITIAL_UNIVERSE_INDEX,
+                universe.index_code,
                 date.strftime("%Y-%m-%d"),
             )
             if snapshot.empty:
@@ -121,7 +159,7 @@ def build_universe_history(args: Namespace) -> None:
         )
         return
 
-    membership = build_index_stock_pool_history(snapshots, INITIAL_UNIVERSE_INDEX)
+    membership = build_index_stock_pool_history(snapshots, universe.index_code)
     _write_csv(membership, _membership_path())
     print(f"已构建 {len(rebalancing_dates)} 个月度快照，共 {len(membership)} 条成分记录。")
 
@@ -170,7 +208,7 @@ def build_research_market_history(args: Namespace) -> None:
         args,
         MARKET_RAW_BY_SYMBOL_DIR,
         MARKET_RAW_DIR,
-        LIXINGER_RESEARCH_PRICE_TYPE,
+        PROJECT_CONFIG.data.research_price_type,
         "研究行情",
     )
 
@@ -181,7 +219,7 @@ def build_execution_market_history(args: Namespace) -> None:
         args,
         MARKET_EXECUTION_BY_SYMBOL_DIR,
         MARKET_EXECUTION_DIR,
-        LIXINGER_EXECUTION_PRICE_TYPE,
+        PROJECT_CONFIG.data.execution_price_type,
         "执行行情",
     )
 
@@ -210,25 +248,27 @@ def _load_pipeline_input(args: Namespace) -> pd.DataFrame:
         return _load_historical_panel()
 
     if args.universe_date:
+        universe = PROJECT_CONFIG.universe
         with LixingerClient() as client:
             constituents = client.fetch_index_constituents(
-                INITIAL_UNIVERSE_INDEX,
+                universe.index_code,
                 args.universe_date,
             )
             stock_pool = build_index_stock_pool(
                 constituents,
-                INITIAL_UNIVERSE_INDEX,
+                universe.index_code,
                 args.universe_date,
             )
             _write_csv(
                 stock_pool,
-                UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{args.universe_date}.csv",
+                UNIVERSE_DIR / f"{universe.index_code}_{args.universe_date}.csv",
             )
             return fetch_universe_daily_bars(
                 stock_pool["symbol"].tolist(),
                 args.start,
                 args.end,
                 client=client,
+                price_type=PROJECT_CONFIG.data.research_price_type,
             )
 
     symbols = normalize_symbols(args.symbols)
@@ -238,6 +278,7 @@ def _load_pipeline_input(args: Namespace) -> pd.DataFrame:
             args.start,
             args.end,
             client=client,
+            price_type=PROJECT_CONFIG.data.research_price_type,
         )
 
 
@@ -257,11 +298,12 @@ def _run_portfolio_backtest(
     factor_data: pd.DataFrame,
     args: Namespace,
 ) -> pd.DataFrame:
+    portfolio = PROJECT_CONFIG.portfolio
     backtest = run_monthly_top_n_backtest(
         factor_data,
-        PORTFOLIO_FACTOR_WEIGHTS,
+        portfolio.factor_weights,
         args.horizon,
-        PORTFOLIO_TOP_N,
+        portfolio.top_n,
     )
     _write_csv(backtest, REPORT_DIR / f"portfolio_backtest_{args.horizon}d.csv")
     summary = summarize_backtest(backtest)
@@ -273,6 +315,7 @@ def _run_execution_backtest(
     factor_data: pd.DataFrame,
     args: Namespace,
 ) -> pd.DataFrame:
+    portfolio = PROJECT_CONFIG.portfolio
     execution_path = _history_panel_path(MARKET_EXECUTION_DIR)
     if not execution_path.exists():
         raise FileNotFoundError("请先构建未复权执行行情面板。")
@@ -290,11 +333,11 @@ def _run_execution_backtest(
     )
     backtest = run_monthly_top_n_backtest(
         execution_panel,
-        PORTFOLIO_FACTOR_WEIGHTS,
+        portfolio.factor_weights,
         args.horizon,
-        PORTFOLIO_TOP_N,
+        portfolio.top_n,
         return_column="execution_return",
-        one_way_cost_rate=PORTFOLIO_ONE_WAY_COST_RATE,
+        one_way_cost_rate=portfolio.one_way_cost_rate,
     )
     _write_csv(backtest, REPORT_DIR / f"execution_backtest_{args.horizon}d.csv")
     summary = summarize_backtest(backtest)
@@ -304,6 +347,7 @@ def _run_execution_backtest(
 
 def run_research_pipeline(args: Namespace) -> None:
     # 运行行情清洗、因子、评估和组合研究。
+    run_config = _resolve_run_config(args)
     raw_data = _load_pipeline_input(args)
     _write_csv(raw_data, MARKET_RAW_DIR / "daily_bars.csv")
 
@@ -319,6 +363,7 @@ def run_research_pipeline(args: Namespace) -> None:
     factor_data = calculate_price_factors(clean_data)
     _write_csv(factor_data, FACTOR_RAW_DIR / "price_factors.csv")
     if not _advanced_research_requested(args):
+        _write_run_config(run_config)
         print("基础流水线已完成。使用 --with-preprocess 或 --with-analysis 生成研究输出。")
         return
 
@@ -343,7 +388,12 @@ def run_research_pipeline(args: Namespace) -> None:
 
     rank_ic_summary: pd.DataFrame | None = None
     if args.with_analysis or args.with_evaluation:
-        rank_ic = calculate_rank_ic(factor_data, factors, args.horizon, IC_SAMPLE_STEP)
+        rank_ic = calculate_rank_ic(
+            factor_data,
+            factors,
+            args.horizon,
+            PROJECT_CONFIG.research.ic_sample_step,
+        )
         rank_ic_summary = summarize_rank_ic(rank_ic)
         _write_csv(rank_ic, REPORT_DIR / f"rank_ic_timeseries_{args.horizon}d.csv")
         _write_csv(rank_ic_summary, REPORT_DIR / f"rank_ic_summary_{args.horizon}d.csv")
@@ -353,8 +403,8 @@ def run_research_pipeline(args: Namespace) -> None:
             factor_data,
             factors,
             args.horizon,
-            QUANTILE_COUNT,
-            IC_SAMPLE_STEP,
+            PROJECT_CONFIG.research.quantile_count,
+            PROJECT_CONFIG.research.ic_sample_step,
         )
         quantile_summary = summarize_quantile_returns(quantile_returns)
         _write_csv(
@@ -366,10 +416,14 @@ def run_research_pipeline(args: Namespace) -> None:
             REPORT_DIR / f"quantile_return_summary_{args.horizon}d.csv",
         )
         _write_csv(
-            summarize_top_bottom_spreads(quantile_summary, QUANTILE_COUNT),
+            summarize_top_bottom_spreads(
+                quantile_summary,
+                PROJECT_CONFIG.research.quantile_count,
+            ),
             REPORT_DIR / f"quantile_spread_summary_{args.horizon}d.csv",
         )
 
+    _write_run_config(run_config)
     if portfolio_summary is not None:
         print("组合研究回测已完成：")
         print(portfolio_summary.to_string(index=False))
