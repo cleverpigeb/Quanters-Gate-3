@@ -29,6 +29,7 @@ quanters_gate_3/
 │  ├─ validation.py                # 共用输入校验
 │  ├─ lixinger.py                  # 理杏仁 HTTP 客户端
 │  ├─ cache.py                     # 可续跑的逐股票缓存
+│  ├─ storage.py                   # 原子文件写入与内容校验
 │  ├─ cleaning.py                  # 日线清洗和审计摘要
 │  ├─ universe.py                  # 历史成员资格与股票代码
 │  ├─ factors.py                   # 原始价格量因子
@@ -38,7 +39,7 @@ quanters_gate_3/
 │  └─ portfolio.py                 # 月度 Top N 组合回测
 ├─ tests/                          # pytest 单元测试和回归测试
 ├─ data/                           # 本地输入、中间结果和报告
-└─ agent.MD                        # 交接给其他 AI 代理的开发文档
+└─ AGENTS.md                       # 交接给其他 AI 代理的开发文档
 ```
 
 ## 环境
@@ -82,7 +83,7 @@ eligible_on_signal_date
 000001.meta.json
 ```
 
-元数据记录实际请求的开始日期、结束日期和价格口径，防止把区间不足的旧缓存误判为完整数据。
+元数据记录缓存格式版本、数据来源、实际请求区间、价格口径、行数、CSV 内容的 SHA-256 摘要和构建时间。CSV 与元数据都通过同目录临时文件原子替换，并最后提交元数据；因此，即使写入中断，也能通过行数或内容摘要不一致识别失效缓存，避免误用新旧文件混合的数据。
 
 ## 常用命令
 

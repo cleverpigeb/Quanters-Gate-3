@@ -1,4 +1,4 @@
-"""集中管理项目数据目录。"""
+# 集中管理项目数据目录。
 
 from pathlib import Path
 
@@ -34,6 +34,6 @@ PROJECT_DIRECTORIES = (
 
 
 def ensure_project_directories() -> None:
-    """创建项目运行所需的全部目录。"""
+    # 创建项目运行所需的全部目录。
     for directory in PROJECT_DIRECTORIES:
         directory.mkdir(parents=True, exist_ok=True)

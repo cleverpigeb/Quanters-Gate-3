@@ -1,4 +1,4 @@
-"""定义项目命令行入口。"""
+# 定义项目命令行入口。
 
 import argparse
 import sys
@@ -16,7 +16,7 @@ from quanters_gate.workflows import execute
 
 
 class ChineseArgumentParser(argparse.ArgumentParser):
-    """提供中文帮助标题和统一的中文参数错误。"""
+    # 提供中文帮助标题和统一的中文参数错误。
 
     def format_usage(self) -> str:
         return super().format_usage().replace("usage:", "用法：", 1)
@@ -30,7 +30,7 @@ class ChineseArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """创建带互斥主模式校验的命令行解析器。"""
+    # 创建带互斥主模式校验的命令行解析器。
     parser = ChineseArgumentParser(description="运行 A 股多因子研究流水线。", add_help=False)
     parser.add_argument("-h", "--help", action="help", help="显示帮助信息并退出。")
     parser.add_argument(
@@ -95,12 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """解析命令行参数。"""
+    # 解析命令行参数。
     return build_parser().parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """运行命令行入口。"""
+    # 运行命令行入口。
     try:
         execute(parse_args(argv))
     except (FileNotFoundError, RuntimeError, ValueError) as error:

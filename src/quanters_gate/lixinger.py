@@ -1,4 +1,4 @@
-"""封装研究流水线使用的理杏仁接口。"""
+# 封装研究流水线使用的理杏仁接口。
 
 import os
 from pathlib import Path
@@ -18,7 +18,7 @@ from quanters_gate.validation import require_positive_finite, validate_date_rang
 
 
 class LixingerClient:
-    """管理本项目所需的理杏仁请求、鉴权和响应校验。"""
+    # 管理本项目所需的理杏仁请求、鉴权和响应校验。
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class LixingerClient:
         self.close()
 
     def close(self) -> None:
-        """释放底层 HTTP 会话。"""
+        # 释放底层 HTTP 会话。
         close = getattr(self._session, "close", None)
         if callable(close):
             close()
@@ -92,7 +92,7 @@ class LixingerClient:
         return data
 
     def fetch_index_constituents(self, index_code: str, as_of_date: str) -> pd.DataFrame:
-        """获取指定日期的指数成分股快照。"""
+        # 获取指定日期的指数成分股快照。
         date, _ = validate_date_range(as_of_date, as_of_date)
         records = self._post(
             LIXINGER_INDEX_CONSTITUENTS_URL,
@@ -129,7 +129,7 @@ class LixingerClient:
         start_date: str,
         end_date: str,
     ) -> pd.DataFrame:
-        """获取指数日线，用于构造真实交易日历。"""
+        # 获取指数日线，用于构造真实交易日历。
         start, end = validate_date_range(start_date, end_date)
         records = self._post(
             LIXINGER_INDEX_CANDLESTICK_URL,
@@ -155,7 +155,7 @@ class LixingerClient:
         end_date: str,
         price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
     ) -> pd.DataFrame:
-        """按明确的价格口径获取个股日线。"""
+        # 按明确的价格口径获取个股日线。
         start, end = validate_date_range(start_date, end_date)
         records = self._post(
             LIXINGER_COMPANY_CANDLESTICK_URL,

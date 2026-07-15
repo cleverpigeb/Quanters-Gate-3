@@ -1,4 +1,4 @@
-"""编排数据构建与研究流水线。"""
+# 编排数据构建与研究流水线。
 
 from argparse import Namespace
 from pathlib import Path
@@ -47,6 +47,7 @@ from quanters_gate.settings import (
     QUANTILE_COUNT,
     REBALANCE_FREQUENCY,
 )
+from quanters_gate.storage import atomic_write_csv
 from quanters_gate.universe import (
     ELIGIBILITY_COLUMN,
     attach_membership_eligibility,
@@ -70,12 +71,11 @@ def _history_panel_path(directory: Path) -> Path:
 
 
 def _write_csv(data: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data.to_csv(path, index=False, encoding=CSV_ENCODING)
+    atomic_write_csv(data, path, encoding=CSV_ENCODING)
 
 
 def build_universe_history(args: Namespace) -> None:
-    """分批构建月末指数成分历史。"""
+    # 分批构建月末指数成分历史。
     require_positive(args.max_universe_snapshots, "单批最大成分快照数")
     with LixingerClient() as client:
         index_bars = client.fetch_index_daily_bars(
@@ -165,7 +165,7 @@ def _build_market_history(
 
 
 def build_research_market_history(args: Namespace) -> None:
-    """构建复权研究行情的完整历史面板。"""
+    # 构建复权研究行情的完整历史面板。
     _build_market_history(
         args,
         MARKET_RAW_BY_SYMBOL_DIR,
@@ -176,7 +176,7 @@ def build_research_market_history(args: Namespace) -> None:
 
 
 def build_execution_market_history(args: Namespace) -> None:
-    """构建未复权执行行情的完整历史面板。"""
+    # 构建未复权执行行情的完整历史面板。
     _build_market_history(
         args,
         MARKET_EXECUTION_BY_SYMBOL_DIR,
@@ -303,7 +303,7 @@ def _run_execution_backtest(
 
 
 def run_research_pipeline(args: Namespace) -> None:
-    """运行行情清洗、因子、评估和组合研究。"""
+    # 运行行情清洗、因子、评估和组合研究。
     raw_data = _load_pipeline_input(args)
     _write_csv(raw_data, MARKET_RAW_DIR / "daily_bars.csv")
 
@@ -384,7 +384,7 @@ def run_research_pipeline(args: Namespace) -> None:
 
 
 def execute(args: Namespace) -> None:
-    """根据命令行参数选择唯一的主工作流。"""
+    # 根据命令行参数选择唯一的主工作流。
     validate_date_range(args.start, args.end)
     require_positive(args.horizon, "未来收益周期")
     ensure_project_directories()

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file exists solely to hand over project context, engineering constraints, and quantitative-correctness requirements to future AI agents. It is not a user guide, research report, or collaboration-process document. Before changing the project, an AI agent must read this file and `README.md`, then inspect the current code and tests instead of relying only on prior conversation history.
+`AGENTS.md` exists solely to hand over project context, engineering constraints, and quantitative-correctness requirements to future AI agents. It is not a user guide, research report, or collaboration-process document. Before changing the project, an AI agent must read this file and `README.md`, then inspect the current code and tests instead of relying only on prior conversation history.
 
 ## Project Scope
 
@@ -19,7 +19,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
 - `validation.py`: Shared input validation across modules.
 - `lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
-- `cache.py`: Per-security caches with requested-range and price-type metadata.
+- `cache.py`: Per-security caches with auditable metadata and content-identity checks.
+- `storage.py`: Shared atomic CSV/JSON writers and SHA-256 file hashing.
 - `cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
 - `universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
 - `factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
@@ -57,11 +58,16 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 
 Every per-security CSV must have a matching `.meta.json` file containing:
 
+- `schema_version`
+- `provider`
 - `requested_start`
 - `requested_end`
 - `price_type`
+- `row_count`
+- `content_sha256`
+- `built_at`
 
-A cache may be reused only when its metadata covers the requested interval, its price type matches the request, and its non-empty CSV contains only valid trading dates. Every CSV row must also match the security encoded by the filename and the requested price type. Legacy caches without metadata must be fetched again.
+A cache may be reused only when its schema and provider match the current implementation, its metadata covers the requested interval, its price type matches the request, its row count and SHA-256 digest match the CSV, and its non-empty CSV contains only valid trading dates. Every CSV row must also match the security encoded by the filename and the requested price type. The CSV is replaced atomically before the metadata is committed, so an interrupted update leaves a detectable mismatch instead of a silently reusable mixed pair. Legacy or incomplete caches must be fetched again.
 
 ## Current Data-Migration State
 

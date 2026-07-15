@@ -1,6 +1,7 @@
-"""管理可续跑的逐股票行情缓存。"""
+# 管理可续跑的逐股票行情缓存。
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -8,7 +9,11 @@ import pandas as pd
 from quanters_gate.dates import normalize_trade_dates
 from quanters_gate.lixinger import LixingerClient
 from quanters_gate.settings import LIXINGER_RESEARCH_PRICE_TYPE
+from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
+
+CACHE_SCHEMA_VERSION = 1
+CACHE_PROVIDER = "lixinger"
 
 
 def fetch_universe_daily_bars(
@@ -18,7 +23,7 @@ def fetch_universe_daily_bars(
     client: LixingerClient | None = None,
     price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
 ) -> pd.DataFrame:
-    """逐只获取行情，并保留其他请求成功的股票。"""
+    # 逐只获取行情，并保留其他请求成功的股票。
     lixinger = client or LixingerClient()
     owns_client = client is None
     frames: list[pd.DataFrame] = []
@@ -61,6 +66,10 @@ def _cache_covers_date_range(
         requested_end = pd.Timestamp(end_date).normalize()
         cached_start = pd.Timestamp(metadata["requested_start"]).normalize()
         cached_end = pd.Timestamp(metadata["requested_end"]).normalize()
+        if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
+            return False
+        if metadata.get("provider") != CACHE_PROVIDER:
+            return False
         if metadata.get("price_type") != price_type:
             return False
         if cached_start > requested_start or cached_end < requested_end:
@@ -72,6 +81,10 @@ def _cache_covers_date_range(
             dtype={"symbol": "string", "price_type": "string"},
         )
         if cached.empty:
+            return False
+        if metadata.get("row_count") != len(cached):
+            return False
+        if metadata.get("content_sha256") != calculate_sha256(file_path):
             return False
         dates = normalize_trade_dates(cached["date"])
         symbols_match = cached["symbol"].notna().all() and cached["symbol"].eq(file_path.stem).all()
@@ -103,23 +116,20 @@ def _write_cache(
     if not normalize_trade_dates(bars["date"]).notna().any():
         raise ValueError("行情缓存没有有效交易日期。")
 
-    csv_temp = file_path.with_suffix(".csv.tmp")
     metadata_path = _metadata_path(file_path)
-    metadata_temp = metadata_path.with_suffix(".json.tmp")
-
-    bars.to_csv(csv_temp, index=False, encoding="utf-8-sig")
-    csv_temp.replace(file_path)
+    atomic_write_csv(bars, file_path)
 
     metadata = {
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "provider": CACHE_PROVIDER,
         "requested_start": start.strftime("%Y-%m-%d"),
         "requested_end": end.strftime("%Y-%m-%d"),
         "price_type": price_type,
+        "row_count": len(bars),
+        "content_sha256": calculate_sha256(file_path),
+        "built_at": datetime.now(UTC).isoformat(),
     }
-    metadata_temp.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    metadata_temp.replace(metadata_path)
+    atomic_write_json(metadata, metadata_path)
 
 
 def cache_daily_bar_batch(
@@ -131,7 +141,7 @@ def cache_daily_bar_batch(
     max_symbols: int,
     price_type: str = LIXINGER_RESEARCH_PRICE_TYPE,
 ) -> dict[str, int]:
-    """缓存有限数量的缺失行情，使批量获取可以安全续跑。"""
+    # 缓存有限数量的缺失行情，使批量获取可以安全续跑。
     require_positive(max_symbols, "单批最大股票数")
     validate_date_range(start_date, end_date)
     directory = Path(cache_dir)
@@ -176,7 +186,7 @@ def cache_daily_bar_batch(
 
 
 def load_cached_daily_bars(cache_dir: str | Path, symbols: list[str]) -> pd.DataFrame:
-    """将逐股票缓存合并为长表。"""
+    # 将逐股票缓存合并为长表。
     if not symbols:
         raise ValueError("缓存股票列表不能为空。")
     directory = Path(cache_dir)

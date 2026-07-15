@@ -1,4 +1,4 @@
-"""管理股票代码、指数成员历史和信号日资格。"""
+# 管理股票代码、指数成员历史和信号日资格。
 
 from collections.abc import Iterable
 
@@ -18,7 +18,7 @@ def _normalize_symbol(symbol: object) -> str:
 
 
 def normalize_symbols(symbols: Iterable[str]) -> list[str]:
-    """按输入顺序返回不重复的六位 A 股代码。"""
+    # 按输入顺序返回不重复的六位 A 股代码。
     normalized: list[str] = []
     seen: set[str] = set()
     for symbol in symbols:
@@ -36,7 +36,7 @@ def build_index_stock_pool(
     index_code: str,
     as_of_date: str | pd.Timestamp,
 ) -> pd.DataFrame:
-    """将单次指数成分响应整理为可审计的股票池快照。"""
+    # 将单次指数成分响应整理为可审计的股票池快照。
     required = ("symbol", "name", "market", "area_code")
     require_columns(constituents, required, "指数成分数据")
 
@@ -49,7 +49,7 @@ def build_index_stock_pool(
 
 
 def monthly_rebalance_dates(trading_dates: pd.Series) -> list[pd.Timestamp]:
-    """选择每个自然月最后一个真实交易日。"""
+    # 选择每个自然月最后一个真实交易日。
     dates = normalize_trade_dates(trading_dates).dropna()
     if dates.empty:
         raise ValueError("交易日期序列不能为空。")
@@ -60,7 +60,7 @@ def build_index_stock_pool_history(
     snapshots: dict[pd.Timestamp, pd.DataFrame],
     index_code: str,
 ) -> pd.DataFrame:
-    """合并多个点时成分快照。"""
+    # 合并多个点时成分快照。
     if not snapshots:
         raise ValueError("指数成分快照不能为空。")
     empty_dates = [date for date, constituents in snapshots.items() if constituents.empty]
@@ -83,7 +83,7 @@ def attach_membership_eligibility(
     data: pd.DataFrame,
     membership_history: pd.DataFrame,
 ) -> pd.DataFrame:
-    """保留完整行情，并标记每行在当日是否具备选股资格。"""
+    # 保留完整行情，并标记每行在当日是否具备选股资格。
     require_columns(data, ("date", "symbol"), "行情数据")
     require_columns(membership_history, ("as_of_date", "symbol"), "成分历史")
 
@@ -121,7 +121,7 @@ def attach_membership_eligibility(
 
 
 def select_eligible_signals(data: pd.DataFrame) -> pd.DataFrame:
-    """仅在存在资格列时筛选可选股票，临时股票列表则全部保留。"""
+    # 仅在存在资格列时筛选可选股票，临时股票列表则全部保留。
     if ELIGIBILITY_COLUMN not in data.columns:
         return data.copy()
 

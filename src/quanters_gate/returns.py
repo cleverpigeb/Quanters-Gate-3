@@ -1,4 +1,4 @@
-"""计算研究口径与执行口径的未来收益。"""
+# 计算研究口径与执行口径的未来收益。
 
 import numpy as np
 import pandas as pd
@@ -8,7 +8,7 @@ from quanters_gate.validation import require_columns, require_positive, require_
 
 
 def add_forward_returns(data: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """按完整个股历史附加未来收盘收益，不移动因子日期。"""
+    # 按完整个股历史附加未来收盘收益，不移动因子日期。
     require_columns(data, ("date", "symbol", "close"), "未来收益输入")
     require_positive(horizon, "未来收益周期")
 
@@ -23,7 +23,7 @@ def add_next_open_execution_returns(
     execution_bars: pd.DataFrame,
     horizon: int,
 ) -> pd.DataFrame:
-    """使用未复权价格附加次日开盘至未来开盘收益。"""
+    # 使用未复权价格附加次日开盘至未来开盘收益。
     require_positive(horizon, "执行收益周期")
     require_columns(signals, ("date", "symbol"), "信号数据")
     require_columns(
