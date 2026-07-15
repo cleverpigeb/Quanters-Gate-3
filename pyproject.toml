@@ -1,11 +1,38 @@
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12"]
+build-backend = "uv_build"
+
 [project]
-name = "Quanters-Gate-3"
+name = "quanters-gate-3"
 version = "0.1.0"
-description = "Three adventurers, one goal: find the Alpha, slay the drawdown, and claim the Gate"
+description = "面向 A 股个股的可复现多因子研究流水线"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "akshare>=1.18.64",
-    "matplotlib>=3.11.0",
+    "numpy>=2.0.0",
     "pandas>=3.0.3",
+    "requests>=2.32.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "ruff>=0.12.0",
+]
+
+[tool.uv.build-backend]
+module-name = "quanters_gate"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "SIM", "UP"]
+
+[tool.ruff.format]
+docstring-code-format = true
