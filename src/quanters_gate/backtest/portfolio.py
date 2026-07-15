@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from quanters_gate.universe import select_eligible_signals
+from quanters_gate.data.universe import select_eligible_signals
 from quanters_gate.validation import (
     require_columns,
     require_non_negative_finite,

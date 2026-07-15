@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from quanters_gate.universe import select_eligible_signals
+from quanters_gate.data.universe import select_eligible_signals
 from quanters_gate.validation import require_columns, require_positive
 
 RANK_IC_COLUMNS = ["date", "factor", "rank_ic"]

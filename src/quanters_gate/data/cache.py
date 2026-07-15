@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from quanters_gate.dates import normalize_trade_dates
-from quanters_gate.provider import DailyBarProvider
+from quanters_gate.data.dates import normalize_trade_dates
+from quanters_gate.data.provider import DailyBarProvider
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range

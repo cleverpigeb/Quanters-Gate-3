@@ -7,8 +7,8 @@ from types import TracebackType
 import pandas as pd
 import requests
 
+from quanters_gate.data.provider import MarketDataProvider
 from quanters_gate.paths import PROJECT_ROOT
-from quanters_gate.provider import MarketDataProvider
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.validation import require_positive_finite, validate_date_range
 

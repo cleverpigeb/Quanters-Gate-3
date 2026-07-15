@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from quanters_gate.dates import normalize_trade_dates
+from quanters_gate.data.dates import normalize_trade_dates
 from quanters_gate.validation import require_columns
 
 REQUIRED_COLUMNS = ("date", "symbol", "open", "high", "low", "close", "volume", "amount")

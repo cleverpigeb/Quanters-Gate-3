@@ -1,4 +1,4 @@
-# 读取并校验项目级 TOML 配置，同时保留外部接口常量。
+# 读取并校验项目级 TOML 配置。
 
 import json
 import math
@@ -9,8 +9,8 @@ from datetime import date, datetime
 from pathlib import Path
 from types import MappingProxyType
 
-from quanters_gate.factors import PRICE_FACTOR_COLUMNS
 from quanters_gate.paths import PROJECT_ROOT
+from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS
 
 CONFIG_PATH = PROJECT_ROOT / "config" / "default.toml"
 

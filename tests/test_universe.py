@@ -1,8 +1,7 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.returns import add_forward_returns
-from quanters_gate.universe import (
+from quanters_gate.data.universe import (
     ELIGIBILITY_COLUMN,
     attach_membership_eligibility,
     build_index_stock_pool_history,
@@ -10,6 +9,7 @@ from quanters_gate.universe import (
     normalize_symbols,
     select_eligible_signals,
 )
+from quanters_gate.research.returns import add_forward_returns
 
 
 def test_normalize_symbols_deduplicates_in_input_order() -> None:

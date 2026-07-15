@@ -8,20 +8,24 @@ from pathlib import Path
 
 import pandas as pd
 
-from quanters_gate.cache import (
+from quanters_gate.backtest.execution import add_next_open_execution_returns
+from quanters_gate.backtest.portfolio import run_monthly_top_n_backtest, summarize_backtest
+from quanters_gate.data.cache import (
     cache_daily_bar_batch,
     fetch_universe_daily_bars,
     load_cached_daily_bars,
 )
-from quanters_gate.cleaning import build_cleaning_summary, clean_daily_bars
-from quanters_gate.evaluation import (
-    calculate_quantile_returns,
-    calculate_rank_ic,
-    summarize_quantile_returns,
-    summarize_rank_ic,
-    summarize_top_bottom_spreads,
+from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
+from quanters_gate.data.provider import MarketDataProvider, MarketDataProviderFactory
+from quanters_gate.data.universe import (
+    ELIGIBILITY_COLUMN,
+    attach_membership_eligibility,
+    build_index_stock_pool,
+    build_index_stock_pool_history,
+    monthly_rebalance_dates,
+    normalize_symbols,
+    select_eligible_signals,
 )
-from quanters_gate.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
 from quanters_gate.paths import (
     FACTOR_PROCESSED_DIR,
     FACTOR_RAW_DIR,
@@ -34,21 +38,18 @@ from quanters_gate.paths import (
     UNIVERSE_DIR,
     ensure_project_directories,
 )
-from quanters_gate.portfolio import run_monthly_top_n_backtest, summarize_backtest
-from quanters_gate.preprocessing import build_preprocess_summary, preprocess_factors
-from quanters_gate.provider import MarketDataProvider, MarketDataProviderFactory
-from quanters_gate.returns import add_forward_returns, add_next_open_execution_returns
+from quanters_gate.research.evaluation import (
+    calculate_quantile_returns,
+    calculate_rank_ic,
+    summarize_quantile_returns,
+    summarize_rank_ic,
+    summarize_top_bottom_spreads,
+)
+from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
+from quanters_gate.research.preprocessing import build_preprocess_summary, preprocess_factors
+from quanters_gate.research.returns import add_forward_returns
 from quanters_gate.settings import PROJECT_CONFIG, RunConfig, serialize_run_config
 from quanters_gate.storage import atomic_write_csv, atomic_write_text
-from quanters_gate.universe import (
-    ELIGIBILITY_COLUMN,
-    attach_membership_eligibility,
-    build_index_stock_pool,
-    build_index_stock_pool_history,
-    monthly_rebalance_dates,
-    normalize_symbols,
-    select_eligible_signals,
-)
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
 CSV_ENCODING = "utf-8-sig"

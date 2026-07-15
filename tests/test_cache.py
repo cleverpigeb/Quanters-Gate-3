@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
-import quanters_gate.cache as cache_module
-from quanters_gate.cache import (
+import quanters_gate.data.cache as cache_module
+from quanters_gate.data.cache import (
     cache_daily_bar_batch,
     fetch_universe_daily_bars,
     load_cached_daily_bars,

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from quanters_gate.lixinger import LixingerClient
+from quanters_gate.data.lixinger import LixingerClient
 
 
 class FakeResponse:

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from quanters_gate.cleaning import build_cleaning_summary, clean_daily_bars
+from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
 
 
 def _raw_bars() -> pd.DataFrame:

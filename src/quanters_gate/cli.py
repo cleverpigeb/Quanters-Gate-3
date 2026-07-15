@@ -4,7 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 
-from quanters_gate.lixinger import LixingerClient
+from quanters_gate.data.lixinger import LixingerClient
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.workflows import execute
 

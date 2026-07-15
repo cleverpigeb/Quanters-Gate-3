@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 import pandas as pd
 
-from quanters_gate.dates import normalize_trade_dates
+from quanters_gate.data.dates import normalize_trade_dates
 from quanters_gate.validation import require_columns
 
 ELIGIBILITY_COLUMN = "eligible_on_signal_date"

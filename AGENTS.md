@@ -12,23 +12,24 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 
 ## Module Responsibilities
 
-- `cli.py`: Chinese-language CLI, argument defaults, and validation of mutually exclusive primary modes.
-- `workflows.py`: Orchestration for constituent history, research prices, execution prices, and research workflows.
-- `settings.py`: Typed loading and validation of the versioned TOML configuration, plus Lixinger API constants.
+- `cli.py`: Chinese-language CLI, argument defaults, primary-mode validation, and concrete provider selection.
+- `workflows.py`: Application orchestration for constituent history, market data, research, and backtests.
+- `settings.py`: Typed loading and strict validation of the versioned TOML configuration.
 - `paths.py`: All project data paths.
-- `dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
-- `validation.py`: Shared input validation across modules.
-- `provider.py`: Provider protocols and the factory type used by data workflows.
-- `lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
-- `cache.py`: Per-security caches with auditable metadata and content-identity checks.
+- `validation.py`: Shared input validation across subpackages.
 - `storage.py`: Shared atomic CSV/JSON/text writers and SHA-256 file hashing.
-- `cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
-- `universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
-- `factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
-- `preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
-- `returns.py`: Forward close-to-close returns and next-open execution returns.
-- `evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
-- `portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
+- `data/provider.py`: Provider protocols and the factory type used by data workflows.
+- `data/lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
+- `data/cache.py`: Per-security caches with auditable metadata and content-identity checks.
+- `data/cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
+- `data/dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
+- `data/universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
+- `research/factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
+- `research/preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
+- `research/returns.py`: Forward close-to-close research returns.
+- `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
+- `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
+- `backtest/execution.py`: Next-open execution returns based on unadjusted prices and tradability.
 
 ## Quantitative Constraints That Must Not Be Violated
 
@@ -52,7 +53,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - Do not restore the former `src.*` or `config.*` compatibility wrappers.
 - Do not reintroduce the removed AkShare moving-average exercise or the `akshare` and `matplotlib` dependencies.
 - Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to the Lixinger API.
-- `cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
+- Preserve the three bounded subpackages: `data` for acquisition and eligibility, `research` for factor analysis, and `backtest` for portfolio and execution logic. Cross-cutting infrastructure and application orchestration stay at the package root.
+- `data/cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
 - Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
 - Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`.
 
