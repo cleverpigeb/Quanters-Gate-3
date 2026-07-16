@@ -9,7 +9,6 @@ import requests
 
 from quanters_gate.data.provider import MarketDataProvider
 from quanters_gate.paths import PROJECT_ROOT
-from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.validation import require_positive_finite, validate_date_range
 
 LIXINGER_INDEX_CONSTITUENTS_URL = "https://open.lixinger.com/api/cn/index/constituents"
@@ -155,7 +154,7 @@ class LixingerClient(MarketDataProvider):
         symbol: str,
         start_date: str,
         end_date: str,
-        price_type: str = PROJECT_CONFIG.data.research_price_type,
+        price_type: str,
     ) -> pd.DataFrame:
         # 按明确的价格口径获取个股日线。
         start, end = validate_date_range(start_date, end_date)

@@ -56,9 +56,9 @@ def test_resolved_run_config_records_cli_overrides(
     args = Namespace(
         run_market_history=True,
         universe_date=None,
-        symbols=["000001", "600000"],
-        start="2022-01-01",
-        end="2024-12-31",
+        symbols=["000001", " 600000 ", "000001"],
+        start="2022/01/01",
+        end="2024/12/31",
         horizon=10,
         max_universe_snapshots=3,
         max_market_symbols=4,
@@ -80,6 +80,59 @@ def test_resolved_run_config_records_cli_overrides(
     assert saved["research"]["forward_days"] == 10
     assert saved["universe"]["symbols"] == ["000001", "600000"]
     assert saved["universe"]["market_fetch_batch_size"] == 4
+
+
+def test_historical_pipeline_filters_signals_after_full_history_calculation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dates = pd.date_range("2023-11-01", periods=60, freq="B")
+    close = pd.Series(range(100, 160), dtype="float64")
+    raw_data = pd.DataFrame(
+        {
+            "date": dates,
+            "symbol": ["000001"] * len(dates),
+            "open": close,
+            "high": close + 1,
+            "low": close - 1,
+            "close": close,
+            "volume": [1000] * len(dates),
+            "amount": [10000] * len(dates),
+        }
+    )
+    args = Namespace(
+        run_market_history=True,
+        universe_date=None,
+        symbols=["000001"],
+        start="2023-12-15",
+        end="2024-01-05",
+        horizon=1,
+        max_universe_snapshots=3,
+        max_market_symbols=4,
+        with_preprocess=True,
+        with_analysis=False,
+        with_evaluation=False,
+        with_backtest=False,
+        with_execution_backtest=False,
+    )
+    captured: dict[str, pd.DataFrame] = {}
+    original_preprocess = workflows.preprocess_factors
+
+    def capture_preprocess(data: pd.DataFrame, factors: list[str]) -> pd.DataFrame:
+        captured["signals"] = data.copy()
+        return original_preprocess(data, factors)
+
+    monkeypatch.setattr(workflows, "_load_pipeline_input", lambda *_args: raw_data.copy())
+    monkeypatch.setattr(workflows, "_write_csv", lambda *_args: None)
+    monkeypatch.setattr(workflows, "_write_run_config", lambda *_args: None)
+    monkeypatch.setattr(workflows, "preprocess_factors", capture_preprocess)
+
+    workflows.run_research_pipeline(args, lambda: EmptySnapshotProvider())
+
+    signals = captured["signals"].sort_values("date").reset_index(drop=True)
+    assert signals["date"].min() == pd.Timestamp("2023-12-15")
+    assert signals["date"].max() == pd.Timestamp("2024-01-05")
+    assert pd.notna(signals.loc[0, "momentum_20d"])
+    assert pd.notna(signals.loc[len(signals) - 1, "forward_return_1d"])
 
 
 def test_workflow_rejects_provider_that_disagrees_with_config() -> None:

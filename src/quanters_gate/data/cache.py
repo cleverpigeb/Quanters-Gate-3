@@ -8,7 +8,6 @@ import pandas as pd
 
 from quanters_gate.data.dates import normalize_trade_dates
 from quanters_gate.data.provider import DailyBarProvider
-from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
@@ -20,7 +19,7 @@ def fetch_universe_daily_bars(
     start_date: str,
     end_date: str,
     provider: DailyBarProvider,
-    price_type: str = PROJECT_CONFIG.data.research_price_type,
+    price_type: str,
 ) -> pd.DataFrame:
     # 逐只获取行情，并保留其他请求成功的股票。
     frames: list[pd.DataFrame] = []
@@ -56,6 +55,8 @@ def _cache_covers_date_range(
 
     try:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict):
+            return False
         requested_start = pd.Timestamp(start_date).normalize()
         requested_end = pd.Timestamp(end_date).normalize()
         cached_start = pd.Timestamp(metadata["requested_start"]).normalize()
@@ -86,7 +87,7 @@ def _cache_covers_date_range(
             cached["price_type"].notna().all() and cached["price_type"].eq(price_type).all()
         )
         return bool(dates.notna().all() and symbols_match and price_types_match)
-    except KeyError, OSError, ValueError, json.JSONDecodeError, pd.errors.ParserError:
+    except KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, pd.errors.ParserError:
         return False
 
 
@@ -108,8 +109,8 @@ def _write_cache(
         raise ValueError(f"行情缓存包含不属于股票 {file_path.stem} 的记录。")
     if price_types.isna().any() or not price_types.eq(price_type).all():
         raise ValueError("行情缓存的价格口径与请求不一致。")
-    if not normalize_trade_dates(bars["date"]).notna().any():
-        raise ValueError("行情缓存没有有效交易日期。")
+    if normalize_trade_dates(bars["date"]).isna().any():
+        raise ValueError("行情缓存包含无效交易日期。")
 
     metadata_path = _metadata_path(file_path)
     atomic_write_csv(bars, file_path)
@@ -134,7 +135,7 @@ def cache_daily_bar_batch(
     cache_dir: str | Path,
     provider: DailyBarProvider,
     max_symbols: int,
-    price_type: str = PROJECT_CONFIG.data.research_price_type,
+    price_type: str,
 ) -> dict[str, int]:
     # 缓存有限数量的缺失行情，使批量获取可以安全续跑。
     require_positive(max_symbols, "单批最大股票数")

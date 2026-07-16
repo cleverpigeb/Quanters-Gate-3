@@ -16,6 +16,7 @@ from quanters_gate.data.cache import (
     load_cached_daily_bars,
 )
 from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
+from quanters_gate.data.dates import normalize_trade_dates
 from quanters_gate.data.provider import MarketDataProvider, MarketDataProviderFactory
 from quanters_gate.data.universe import (
     ELIGIBILITY_COLUMN,
@@ -69,7 +70,13 @@ def _write_csv(data: pd.DataFrame, path: Path) -> None:
     atomic_write_csv(data, path, encoding=CSV_ENCODING)
 
 
+def _normalized_research_dates(args: Namespace) -> tuple[str, str]:
+    start, end = validate_date_range(args.start, args.end)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
 def _resolve_run_config(args: Namespace) -> RunConfig:
+    start_date, end_date = _normalized_research_dates(args)
     if args.run_market_history:
         mode = "historical_market"
     elif args.universe_date:
@@ -95,13 +102,13 @@ def _resolve_run_config(args: Namespace) -> RunConfig:
         with_execution_backtest=args.with_execution_backtest,
         research=replace(
             PROJECT_CONFIG.research,
-            start_date=args.start,
-            end_date=args.end,
+            start_date=start_date,
+            end_date=end_date,
             forward_days=args.horizon,
         ),
         universe=replace(
             PROJECT_CONFIG.universe,
-            symbols=tuple(args.symbols),
+            symbols=tuple(normalize_symbols(args.symbols)),
             snapshot_batch_size=args.max_universe_snapshots,
             market_fetch_batch_size=args.max_market_symbols,
         ),
@@ -328,6 +335,19 @@ def _advanced_research_requested(args: Namespace) -> bool:
     )
 
 
+def _filter_signal_date_range(data: pd.DataFrame, args: Namespace) -> pd.DataFrame:
+    # 仅限制信号日期，因子回看和未来收益仍使用完整行情历史。
+    require_columns(data, ("date",), "信号数据")
+    start_date, end_date = _normalized_research_dates(args)
+    result = data.copy()
+    result["date"] = normalize_trade_dates(result["date"])
+    if result["date"].isna().any():
+        raise ValueError("信号数据包含无效交易日期。")
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    return result.loc[result["date"].between(start, end)].copy()
+
+
 def _run_portfolio_backtest(
     factor_data: pd.DataFrame,
     args: Namespace,
@@ -406,6 +426,7 @@ def run_research_pipeline(
 
     factors = list(PRICE_FACTOR_COLUMNS)
     factor_data = add_forward_returns(factor_data, args.horizon)
+    factor_data = _filter_signal_date_range(factor_data, args)
     factor_data = select_eligible_signals(factor_data)
     if factor_data.empty:
         raise ValueError("当前日期范围内没有具备信号日资格的记录。")
