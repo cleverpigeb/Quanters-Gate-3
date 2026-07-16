@@ -194,10 +194,11 @@ LIXINGER_TOKEN=你的真实令牌
 
 ```powershell
 git lfs pull
-Expand-Archive -LiteralPath data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip -DestinationPath . -Force
+New-Item -ItemType Directory -Path data -Force | Out-Null
+Expand-Archive -LiteralPath data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip -DestinationPath data -Force
 ```
 
-归档内部已经包含 `data/` 目录，因此应解压到项目根目录。解压不会修改版本控制内的配置文件。
+归档内部直接包含 `market/`、`universe/`、`factors/` 和 `reports/`，因此必须解压到项目的 `data/` 目录。解压不会修改版本控制内的配置文件。完成后可直接运行 `--run-market-history` 研究命令，无需再次执行任何 `--build-*` 数据下载命令。
 
 如需精确复现 v1 的所有派生文件，应先使用其清单记录的 `project_commit`。在当前代码上从同一份成分历史重新计算时，依次运行以下命令，并在代码提交后创建新的快照标识和清单，不能覆盖 v1：
 
