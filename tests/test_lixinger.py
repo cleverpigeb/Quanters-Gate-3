@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import requests
 
@@ -39,6 +40,7 @@ def test_index_daily_bars_returns_sorted_trading_dates() -> None:
         bars = client.fetch_index_daily_bars("000300", "2024-01-01", "2024-01-31")
 
     assert len(bars) == 2
+    assert bars["date"].tolist() == [pd.Timestamp("2024-01-30"), pd.Timestamp("2024-01-31")]
     assert bars.loc[0, "date"] < bars.loc[1, "date"]
     assert session.request["headers"] == {"Accept-Encoding": "gzip"}
     assert session.closed

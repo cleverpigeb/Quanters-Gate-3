@@ -30,3 +30,18 @@ def test_calculator_requires_full_lookback_window(price_data: pd.DataFrame) -> N
 def test_calculator_rejects_incomplete_input(price_data: pd.DataFrame) -> None:
     with pytest.raises(ValueError, match="amount"):
         calculate_price_factors(price_data.drop(columns="amount"))
+
+
+def test_calculator_does_not_bridge_a_missing_market_date(price_data: pd.DataFrame) -> None:
+    complete = price_data.copy()
+    incomplete = price_data.copy()
+    incomplete["symbol"] = "000002"
+    incomplete = incomplete.drop(index=10)
+    panel = pd.concat([complete, incomplete], ignore_index=True)
+
+    factors = calculate_price_factors(panel)
+    last_incomplete = factors.loc[factors["symbol"] == "000002"].iloc[-1]
+
+    assert pd.isna(last_incomplete["momentum_20d"])
+    assert pd.isna(last_incomplete["volatility_20d"])
+    assert pd.isna(last_incomplete["turnover_proxy_20d"])

@@ -79,6 +79,15 @@ def test_load_project_config_rejects_invalid_price_convention(tmp_path: Path) ->
         load_project_config(config_path)
 
 
+def test_load_project_config_accepts_akshare(tmp_path: Path) -> None:
+    config_path = tmp_path / "akshare.toml"
+    config_path.write_text(
+        VALID_CONFIG.replace('provider = "lixinger"', 'provider = "akshare"'), encoding="utf-8"
+    )
+
+    assert load_project_config(config_path).data.provider == "akshare"
+
+
 def test_load_project_config_rejects_malformed_toml(tmp_path: Path) -> None:
     config_path = tmp_path / "invalid.toml"
     config_path.write_text("[research\n", encoding="utf-8")
@@ -106,4 +115,26 @@ def test_load_project_config_rejects_unknown_keys(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="无法识别的配置项：forward_day"):
+        load_project_config(config_path)
+
+
+def test_load_project_config_rejects_overlapping_evaluation_windows(tmp_path: Path) -> None:
+    config_path = tmp_path / "overlap.toml"
+    config_path.write_text(
+        VALID_CONFIG.replace("ic_sample_step = 10", "ic_sample_step = 5"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="窗口会重叠"):
+        load_project_config(config_path)
+
+
+def test_load_project_config_rejects_cost_rate_above_one(tmp_path: Path) -> None:
+    config_path = tmp_path / "cost.toml"
+    config_path.write_text(
+        VALID_CONFIG.replace("one_way_cost_rate = 0.002", "one_way_cost_rate = 1.1"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="不能大于 1"):
         load_project_config(config_path)

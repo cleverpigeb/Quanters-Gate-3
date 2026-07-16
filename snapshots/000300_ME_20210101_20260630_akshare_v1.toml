@@ -1,0 +1,187 @@
+schema_version = 1
+snapshot_id = "000300_ME_20210101_20260630_akshare_v1"
+status = "frozen"
+created_at = "2026-07-16T06:42:31Z"
+project_commit = "83a0547facb53c42be342fc402dc077868c49063"
+
+[scope]
+provider = "akshare"
+index_code = "000300"
+index_name = "沪深 300"
+rebalance_frequency = "ME"
+research_start = "2021-01-01"
+research_end = "2026-06-30"
+forward_days = 20
+research_price_type = "lxr_fc_rights"
+execution_price_type = "ex_rights"
+
+[archive]
+path = "data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip"
+sha256 = "92118320e42d9465c96bf6956e302ca1e2af7514b729b11a2afb23442bae5275"
+bytes = 177411057
+entry_count = 1855
+tracked_by_git = false
+
+[membership]
+path = "data/universe/000300_ME_membership.csv"
+sha256 = "00dd805d717270f0328e936b7aa369150dd6d98fea1a9e1e4d9bf878d23395b6"
+row_count = 19800
+snapshot_count = 66
+unique_symbol_count = 459
+first_snapshot = "2021-01-29"
+last_snapshot = "2026-06-30"
+
+[cache.research]
+path = "data/market/raw/by_symbol"
+provider = "akshare"
+price_type = "lxr_fc_rights"
+csv_count = 459
+metadata_count = 459
+row_count = 593334
+eastmoney_symbol_count = 105
+sina_symbol_count = 354
+identity_sha256 = "a8533b8311f67d7bfab310a93fd6d50eb33c8a428d8704ef6795c379ca8e3825"
+identity_format = "按股票代码排序后，对每行 <symbol>,<csv_sha256>,<metadata_sha256>\\n 计算 SHA-256。"
+
+[cache.execution]
+path = "data/market/execution/by_symbol"
+provider = "akshare"
+price_type = "ex_rights"
+csv_count = 459
+metadata_count = 459
+row_count = 593335
+eastmoney_symbol_count = 182
+sina_symbol_count = 277
+identity_sha256 = "fd83bcdc7820c85415cc67e8890479ad93fa6a0b9ca98af1ee3d4d34a3e73e4a"
+identity_format = "按股票代码排序后，对每行 <symbol>,<csv_sha256>,<metadata_sha256>\\n 计算 SHA-256。"
+
+[integrity]
+membership_duplicate_pair_count = 0
+research_panel_duplicate_pair_count = 0
+execution_panel_duplicate_pair_count = 0
+research_ineligible_row_count = 201096
+execution_ineligible_row_count = 201097
+research_contains_688072 = true
+execution_contains_688072 = true
+portfolio_cost_identity_max_error = 0.0
+execution_cost_identity_max_error = 1.1102230246251565e-16
+execution_cost_turnover_max_error = 6.678685382510707e-17
+
+[[artifacts]]
+path = "config/default.toml"
+sha256 = "f341a41445e5ceef922faa6da625e863ebafe225445528ba40fe45193feaf69e"
+bytes = 779
+
+[[artifacts]]
+path = "data/universe/000300_ME_membership.csv"
+sha256 = "00dd805d717270f0328e936b7aa369150dd6d98fea1a9e1e4d9bf878d23395b6"
+bytes = 865308
+rows = 19800
+
+[[artifacts]]
+path = "data/market/raw/000300_ME_panel.csv"
+sha256 = "1362cfd902ca912bcd8841021d35e2cd95a9c90cd5b77d3b73eecb0c5c18eb61"
+bytes = 62583460
+rows = 593334
+
+[[artifacts]]
+path = "data/market/raw/daily_bars.csv"
+sha256 = "1362cfd902ca912bcd8841021d35e2cd95a9c90cd5b77d3b73eecb0c5c18eb61"
+bytes = 62583460
+rows = 593334
+
+[[artifacts]]
+path = "data/market/processed/daily_bars.csv"
+sha256 = "9e434cd1454206ab43ec1e58a8caacc87c45df988a4abe30be28e62cb111efa7"
+bytes = 65550142
+rows = 593334
+
+[[artifacts]]
+path = "data/market/execution/000300_ME_panel.csv"
+sha256 = "4bbdefe1ff30aaab93f92511a4231213cc8ad7313f56c3034631782fe87ee3b5"
+bytes = 59034021
+rows = 593335
+
+[[artifacts]]
+path = "data/factors/raw/price_factors.csv"
+sha256 = "b3bee421cc2d5d8e155e834208e4208c2e142a5192a2c748b3e81fa0a72b027a"
+bytes = 112754956
+rows = 593334
+
+[[artifacts]]
+path = "data/factors/processed/factor_panel_processed.csv"
+sha256 = "f301e0c4c996da6ceafe82f11fcd7d0356e0c42c7a00287f80320bcf722a2397"
+bytes = 82124765
+rows = 392238
+
+[[artifacts]]
+path = "data/reports/market_cleaning_summary.csv"
+sha256 = "1a2387acf9f1efca7ded8049cdc99a19e06ba5bde0dca294f8bf2d7b056ffbcd"
+bytes = 135
+rows = 1
+
+[[artifacts]]
+path = "data/reports/preprocess_summary.csv"
+sha256 = "1598910da1d19d449e49656bf031bfca2d3ee3b72cedc44b187362d779aa3431"
+bytes = 273
+rows = 4
+
+[[artifacts]]
+path = "data/reports/rank_ic_timeseries_20d.csv"
+sha256 = "32e813ee6f3d324081ef7975764025c7dddd2bdc9f8748d26c37a8f37070c968"
+bytes = 12194
+rows = 258
+
+[[artifacts]]
+path = "data/reports/rank_ic_summary_20d.csv"
+sha256 = "95292b21f1840e493a84defa991b471b96103c5fb7818ec7cb7a9b0180bcc461"
+bytes = 435
+rows = 4
+
+[[artifacts]]
+path = "data/reports/quantile_return_timeseries_20d.csv"
+sha256 = "69a2da0e3b6dbc21c20b7aa70e4465600a6ffb9b161197502179d4c515c318ac"
+bytes = 64252
+rows = 1290
+
+[[artifacts]]
+path = "data/reports/quantile_return_summary_20d.csv"
+sha256 = "30538e7584d8546cd83627e1dc1888edac1995eb46b16e3e37272bd1582f4780"
+bytes = 909
+rows = 20
+
+[[artifacts]]
+path = "data/reports/quantile_spread_summary_20d.csv"
+sha256 = "33f153ff4b3111f062e1490f0851546bdedb354c31d37f8026eab1add5095921"
+bytes = 396
+rows = 4
+
+[[artifacts]]
+path = "data/reports/portfolio_backtest_20d.csv"
+sha256 = "0aa8a048ea8946d776c2cb519e14c3525b4a96f1e1e4c5f4bf828f28ed895b0a"
+bytes = 7598
+rows = 64
+
+[[artifacts]]
+path = "data/reports/portfolio_backtest_summary_20d.csv"
+sha256 = "4c6be2a33dabc581303514c86af5db4ea881afc44431e425dbb8d09caadf8d31"
+bytes = 378
+rows = 1
+
+[[artifacts]]
+path = "data/reports/execution_backtest_20d.csv"
+sha256 = "69cf35111923707583647efe43d6f7a7b93f51ad654945de94245d99b5fb9292"
+bytes = 8553
+rows = 64
+
+[[artifacts]]
+path = "data/reports/execution_backtest_summary_20d.csv"
+sha256 = "729466b872a96a667d409557c65422aa1d0fc634283a4bbe16064e319a1df68a"
+bytes = 378
+rows = 1
+
+[[artifacts]]
+path = "data/reports/run_config.toml"
+sha256 = "15d838f376203e932faab63286af053dc6cc18422aff2b8fae961a842c6a7919"
+bytes = 742
+

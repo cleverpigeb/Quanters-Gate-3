@@ -4,9 +4,16 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from quanters_gate.data.akshare import AkShareClient
 from quanters_gate.data.lixinger import LixingerClient
+from quanters_gate.data.provider import MarketDataProviderFactory
 from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.workflows import execute
+
+PROVIDER_FACTORIES: dict[str, MarketDataProviderFactory] = {
+    "akshare": AkShareClient,
+    "lixinger": LixingerClient,
+}
 
 
 class ChineseArgumentParser(argparse.ArgumentParser):
@@ -95,10 +102,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
 
+def provider_factory_for(name: str) -> MarketDataProviderFactory:
+    # 在组合根中选择配置指定的数据源实现。
+    try:
+        return PROVIDER_FACTORIES[name]
+    except KeyError:
+        raise ValueError(f"不支持的数据源：{name}") from None
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     # 运行命令行入口。
     try:
-        execute(parse_args(argv), LixingerClient)
+        execute(parse_args(argv), provider_factory_for(PROJECT_CONFIG.data.provider))
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"错误：{error}", file=sys.stderr)
         raise SystemExit(1) from None

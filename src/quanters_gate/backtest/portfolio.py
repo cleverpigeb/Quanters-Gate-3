@@ -5,8 +5,10 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
-from quanters_gate.data.universe import select_eligible_signals
+from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.universe import normalize_symbol_values, select_eligible_signals
 from quanters_gate.validation import (
+    normalize_boolean_values,
     require_columns,
     require_non_negative_finite,
     require_positive,
@@ -42,16 +44,17 @@ def _validate_backtest_input(
         raise ValueError("组合因子权重必须是有限数值。") from None
     if any(not np.isfinite(weight) for weight in weights.values()):
         raise ValueError("组合因子权重必须是有限数值。")
-    if not any(weight != 0 for weight in weights.values()):
+    active_weights = {factor: weight for factor, weight in weights.items() if weight != 0}
+    if not active_weights:
         raise ValueError("组合因子权重不能全部为零。")
 
     target = return_column or f"forward_return_{horizon}d"
-    require_columns(data, ("date", "symbol", target, *weights), "组合回测输入")
-    return target, weights
+    require_columns(data, ("date", "symbol", target, *active_weights), "组合回测输入")
+    return target, active_weights
 
 
 def _monthly_signal_dates(data: pd.DataFrame) -> list[pd.Timestamp]:
-    dates = pd.to_datetime(data["date"], errors="coerce").dropna()
+    dates = data["date"].dropna()
     return dates.groupby(dates.dt.to_period("M")).max().tolist()
 
 
@@ -87,12 +90,18 @@ def run_monthly_top_n_backtest(
         return_column,
     )
     require_non_negative_finite(one_way_cost_rate, "单边成本率")
+    if one_way_cost_rate > 1:
+        raise ValueError("单边成本率不能大于 1。")
 
     result = select_eligible_signals(data)
-    result["date"] = pd.to_datetime(result["date"], errors="coerce")
-    result["symbol"] = result["symbol"].astype("string")
-    result = result.dropna(subset=["date", "symbol"])
+    result["date"] = normalize_required_trade_dates(result["date"], "组合回测输入")
+    result["symbol"] = normalize_symbol_values(result["symbol"], "组合回测输入")
     require_unique_rows(result, ("date", "symbol"), "组合回测输入")
+    if "is_tradable" in result.columns:
+        result["is_tradable"] = normalize_boolean_values(
+            result["is_tradable"],
+            "组合回测可交易性标记",
+        )
     date_groups = {
         pd.Timestamp(date): group
         for date, group in result.groupby("date", sort=False, observed=True)
@@ -104,7 +113,7 @@ def run_monthly_top_n_backtest(
     for date in _monthly_signal_dates(result):
         cross_section = date_groups[pd.Timestamp(date)]
         if "is_tradable" in cross_section.columns:
-            cross_section = cross_section.loc[cross_section["is_tradable"].fillna(False)]
+            cross_section = cross_section.loc[cross_section["is_tradable"]]
         usable = cross_section.dropna(subset=required_values).copy()
         if usable.empty:
             continue
@@ -162,16 +171,17 @@ def summarize_backtest(backtest: pd.DataFrame, periods_per_year: int = 12) -> pd
     require_positive(periods_per_year, "年化周期数")
 
     ordered = backtest.copy()
-    ordered["date"] = pd.to_datetime(ordered["date"], errors="coerce")
-    if ordered["date"].isna().any():
-        raise ValueError("回测数据包含无效日期。")
+    ordered["date"] = normalize_required_trade_dates(ordered["date"], "回测数据")
     ordered = ordered.sort_values("date").reset_index(drop=True)
+    require_unique_rows(ordered, ("date",), "回测数据")
     numeric_columns = ["portfolio_return", "benchmark_return", "turnover"]
     numeric = ordered[numeric_columns].apply(pd.to_numeric, errors="coerce")
     if not np.isfinite(numeric).all().all():
         raise ValueError("回测收益和换手率必须是有限数值。")
     if numeric[["portfolio_return", "benchmark_return"]].lt(-1).any().any():
         raise ValueError("回测收益率不能小于 -100%。")
+    if numeric["turnover"].lt(0).any() or numeric["turnover"].gt(1).any():
+        raise ValueError("回测换手率必须位于 0 到 1 之间。")
     ordered[numeric_columns] = numeric
 
     observations = len(ordered)
@@ -181,7 +191,7 @@ def summarize_backtest(backtest: pd.DataFrame, periods_per_year: int = 12) -> pd
     benchmark_total = benchmark_nav.iloc[-1] - 1
     annualized_portfolio = portfolio_nav.iloc[-1] ** (periods_per_year / observations) - 1
     annualized_benchmark = benchmark_nav.iloc[-1] ** (periods_per_year / observations) - 1
-    drawdown = portfolio_nav / portfolio_nav.cummax() - 1
+    drawdown = portfolio_nav / portfolio_nav.cummax().clip(lower=1.0) - 1
 
     return pd.DataFrame(
         [

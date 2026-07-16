@@ -1,6 +1,13 @@
 import pytest
 
-from quanters_gate.cli import build_parser, main, parse_args
+from quanters_gate.cli import (
+    AkShareClient,
+    LixingerClient,
+    build_parser,
+    main,
+    parse_args,
+    provider_factory_for,
+)
 from quanters_gate.settings import PROJECT_CONFIG
 
 
@@ -32,6 +39,11 @@ def test_command_defaults_come_from_toml_config() -> None:
     assert args.horizon == PROJECT_CONFIG.research.forward_days
     assert args.max_universe_snapshots == PROJECT_CONFIG.universe.snapshot_batch_size
     assert args.max_market_symbols == PROJECT_CONFIG.universe.market_fetch_batch_size
+
+
+def test_provider_factory_uses_the_configured_provider_registry() -> None:
+    assert provider_factory_for("akshare") is AkShareClient
+    assert provider_factory_for("lixinger") is LixingerClient
 
 
 def test_main_rejects_reversed_date_range_in_chinese(

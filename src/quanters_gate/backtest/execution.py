@@ -3,8 +3,14 @@
 import numpy as np
 import pandas as pd
 
-from quanters_gate.data.dates import normalize_trade_dates
-from quanters_gate.validation import require_columns, require_positive, require_unique_rows
+from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.universe import normalize_symbol_values
+from quanters_gate.validation import (
+    normalize_boolean_values,
+    require_columns,
+    require_positive,
+    require_unique_rows,
+)
 
 
 def add_next_open_execution_returns(
@@ -22,48 +28,56 @@ def add_next_open_execution_returns(
     )
     if execution_bars.empty:
         raise ValueError("执行行情不能为空。")
-    if not execution_bars["price_type"].eq("ex_rights").all():
+    price_types = execution_bars["price_type"].astype("string")
+    if price_types.isna().any() or not price_types.eq("ex_rights").all():
         raise ValueError("执行行情必须全部使用 ex_rights 未复权价格。")
 
     signal_data = signals.copy()
-    signal_data["date"] = normalize_trade_dates(signal_data["date"])
-    signal_data["symbol"] = signal_data["symbol"].astype("string").str.strip()
-    if signal_data[["date", "symbol"]].isna().any().any():
-        raise ValueError("信号数据包含无效日期或股票代码。")
+    signal_data["date"] = normalize_required_trade_dates(signal_data["date"], "信号数据")
+    signal_data["symbol"] = normalize_symbol_values(signal_data["symbol"], "信号数据")
     require_unique_rows(signal_data, ("date", "symbol"), "信号数据")
 
     bars = execution_bars.copy()
-    bars["date"] = normalize_trade_dates(bars["date"])
-    bars["symbol"] = bars["symbol"].astype("string").str.strip()
+    bars["date"] = normalize_required_trade_dates(bars["date"], "执行行情")
+    bars["symbol"] = normalize_symbol_values(bars["symbol"], "执行行情")
+    require_unique_rows(bars, ("date", "symbol"), "执行行情")
     bars["open"] = pd.to_numeric(bars["open"], errors="coerce")
     bars["open"] = bars["open"].where(np.isfinite(bars["open"]) & bars["open"].gt(0))
+    bars["is_tradable"] = normalize_boolean_values(bars["is_tradable"], "执行行情可交易性标记")
+    signal_data["_has_execution_signal_date"] = signal_data["date"].isin(bars["date"])
 
-    tradable = bars["is_tradable"].astype("string").str.strip().str.lower()
-    tradable_mapping = {"true": True, "false": False, "1": True, "0": False}
-    invalid_tradable = tradable.notna() & ~tradable.isin(tradable_mapping)
-    if invalid_tradable.any():
-        raise ValueError("执行行情包含无法识别的可交易性标记。")
-    bars["is_tradable"] = tradable.map(tradable_mapping).fillna(False).astype(bool)
-    bars = (
-        bars.dropna(subset=["date", "symbol", "open"])
-        .sort_values(["symbol", "date"])
-        .drop_duplicates(["date", "symbol"], keep="last")
+    calendar = pd.DataFrame(
+        {
+            "date": pd.Index(
+                pd.concat([signal_data["date"], bars["date"]], ignore_index=True).unique()
+            ).sort_values()
+        }
     )
-    grouped = bars.groupby("symbol", sort=False)
-    bars["entry_open"] = grouped["open"].shift(-1)
-    bars["exit_open"] = grouped["open"].shift(-(horizon + 1))
-    bars["entry_tradable"] = grouped["is_tradable"].shift(-1)
-    bars["exit_tradable"] = grouped["is_tradable"].shift(-(horizon + 1))
+    calendar["entry_date"] = calendar["date"].shift(-1)
+    calendar["exit_date"] = calendar["date"].shift(-(horizon + 1))
+    result = signal_data.merge(calendar, on="date", how="left", validate="many_to_one")
+    result.loc[
+        ~result["_has_execution_signal_date"],
+        ["entry_date", "exit_date"],
+    ] = pd.NaT
 
-    execution = bars[
-        ["date", "symbol", "entry_open", "exit_open", "entry_tradable", "exit_tradable"]
-    ]
-    result = signal_data.merge(
-        execution,
-        on=["date", "symbol"],
+    entry = bars[["date", "symbol", "open", "is_tradable"]].rename(
+        columns={"date": "entry_date", "open": "entry_open", "is_tradable": "entry_tradable"}
+    )
+    exit_data = bars[["date", "symbol", "open", "is_tradable"]].rename(
+        columns={"date": "exit_date", "open": "exit_open", "is_tradable": "exit_tradable"}
+    )
+    result = result.merge(
+        entry,
+        on=["entry_date", "symbol"],
         how="left",
-        validate="one_to_one",
+        validate="many_to_one",
+    ).merge(
+        exit_data,
+        on=["exit_date", "symbol"],
+        how="left",
+        validate="many_to_one",
     )
     ready = result["entry_tradable"].fillna(False) & result["exit_tradable"].fillna(False)
     result["execution_return"] = (result["exit_open"] / result["entry_open"] - 1).where(ready)
-    return result
+    return result.drop(columns=["_has_execution_signal_date", "entry_date", "exit_date"])

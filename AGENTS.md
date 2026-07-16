@@ -18,18 +18,19 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `paths.py`: All project data paths.
 - `validation.py`: Shared input validation across subpackages.
 - `storage.py`: Shared atomic CSV/JSON/text writers and SHA-256 file hashing.
-- `data/provider.py`: Provider protocols and the factory type used by data workflows.
+- `data/provider.py`: Provider protocols, the factory type, and bounded sequential multi-security retrieval.
+- `data/akshare.py`: AKShare field conversion, price-convention mapping, and source-snapshot validation.
 - `data/lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
 - `data/cache.py`: Per-security caches with auditable metadata and content-identity checks.
 - `data/cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
-- `data/dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
+- `data/dates.py`: Shanghai trading-date normalization and global-calendar position mapping.
 - `data/universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
-- `research/factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
+- `research/factors.py`: Calendar-aligned 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
 - `research/preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
-- `research/returns.py`: Forward close-to-close research returns.
+- `research/returns.py`: Calendar-aligned forward close-to-close research returns.
 - `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
 - `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
-- `backtest/execution.py`: Next-open execution returns based on unadjusted prices and tradability.
+- `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
 
 ## Quantitative Constraints That Must Not Be Violated
 
@@ -51,8 +52,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - Python identifiers, CSV field names, command-line options, and external API fields must retain stable English names.
 - Shared logic should be placed in the existing module with the appropriate responsibility. Do not duplicate date normalization, column validation, or file-writing logic.
 - Do not restore the former `src.*` or `config.*` compatibility wrappers.
-- Do not reintroduce the removed AkShare moving-average exercise or the `akshare` and `matplotlib` dependencies.
-- Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to the Lixinger API.
+- Do not reintroduce the removed AkShare moving-average exercise or `matplotlib`. `akshare` is retained only as a provider dependency.
+- Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to any provider.
 - Preserve the three bounded subpackages: `data` for acquisition and eligibility, `research` for factor analysis, and `backtest` for portfolio and execution logic. Cross-cutting infrastructure and application orchestration stay at the package root.
 - `data/cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
 - Low-level `data` modules must receive price conventions explicitly and must not import `PROJECT_CONFIG`.
@@ -63,7 +64,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 
 The `config/default.toml` file is the single version-controlled source of research defaults and includes an explicit `schema_version`. It is opened read-only and validated at process startup; normal execution must never rewrite, normalize, or format this authoritative input. The loader contains no fallback research parameters. It records the research interval, forward-return and evaluation parameters, random seed, default symbols, benchmark index, rebalance frequency, download batch sizes, data provider, price conventions, portfolio size, transaction cost, and factor weights.
 
-Command-line values may temporarily override the supported date, symbol, horizon, and batch-size defaults. After a successful research run, the fully resolved configuration and run-mode flags must be atomically saved as `data/reports/run_config.toml`; this artifact must contain the effective overrides rather than a copy of defaults. Secrets must never be stored in TOML: the Lixinger token remains an environment or untracked `.env` value. `settings.py` must reject malformed, incomplete, unsupported, or quantitatively unsafe configuration instead of silently falling back to hidden constants.
+Command-line values may temporarily override the supported date, symbol, horizon, and batch-size defaults. After a successful research run, the fully resolved configuration and run-mode flags must be atomically saved as `data/reports/run_config.toml`; this artifact must contain the effective overrides rather than a copy of defaults. Secrets must never be stored in TOML: if the Lixinger provider is selected, its token remains an environment or untracked `.env` value. `settings.py` must reject malformed, incomplete, unsupported, or quantitatively unsafe configuration instead of silently falling back to hidden constants.
 
 ## Data Cache Contract
 
@@ -73,28 +74,34 @@ Every per-security CSV must have a matching `.meta.json` file containing:
 - `provider`
 - `requested_start`
 - `requested_end`
+- `observed_start`
+- `observed_end`
 - `price_type`
 - `row_count`
 - `content_sha256`
 - `built_at`
 
-A cache may be reused only when its schema and provider match the current implementation, its metadata covers the requested interval, its price type matches the request, its row count and SHA-256 digest match the CSV, and its non-empty CSV contains only valid trading dates. Every CSV row must also match the security encoded by the filename and the requested price type. The CSV is replaced atomically before the metadata is committed, so an interrupted update leaves a detectable mismatch instead of a silently reusable mixed pair. Legacy or incomplete caches must be fetched again.
+When AKShare provides a cache, the CSV and metadata must additionally record its single actual `data_source` (`eastmoney` or `sina`); legacy AKShare caches lacking it must be fetched again. Tencent's daily interface does not provide transaction value and must not be used to fabricate the required `amount` field.
 
-## Current Data-Migration State
+A cache may be reused only when its schema and provider match the current implementation, its metadata covers the requested interval, its recorded observed date range exactly matches the valid dates in the CSV, its price type matches the request, its row count and SHA-256 digest match the CSV, and its non-empty CSV contains only valid trading dates. `observed_start` may be later than `requested_start` for a stock that was not yet listed; this is an audited availability boundary rather than fabricated missing data. Every CSV row must also match the security encoded by the filename and the requested price type. The CSV is replaced atomically before the metadata is committed, so an interrupted update leaves a detectable mismatch instead of a silently reusable mixed pair. Legacy or incomplete caches must be fetched again.
 
-The local ignored `data/market/raw/000300_ME_panel.csv` is a legacy constituent-filtered panel. It lacks complete prices before index inclusion and after index removal, and it does not contain a native eligibility column. For compatibility, the current code temporarily adds an eligibility column when reading this file and emits a warning, but it cannot recover prices that were already discarded.
+## Current Frozen Data Snapshot
 
-The audited local membership history contains 459 unique securities, while the legacy market panel contains 458. Security `688072` appears in the final membership snapshot but has no row in the local market panel. The local `portfolio_backtest_20d.csv` also predates the current report schema and lacks the `gross_portfolio_return` and `transaction_cost` columns.
+The corrected shared-data snapshot is `000300_ME_20210101_20260630_akshare_v1`. It retains the existing audited `000300_ME_membership.csv`, which contains 66 month-end snapshots, 19,800 membership rows, and 459 unique historical securities from 2021-01-29 through 2026-06-30. AKShare was used only to retrieve complete per-security prices for that historical symbol set; it was not used to infer or backfill historical membership.
 
-Corrected shared data and reports can be rebuilt only when a Lixinger token is available, using this sequence:
+Both price conventions have 459 valid CSV/metadata pairs. The forward-adjusted research panel contains 593,334 rows, and the unadjusted execution panel contains 593,335 rows. Both panels cover all 459 historical securities, including `688072`, and retain prices outside membership periods. The research panel has 201,096 rows with `eligible_on_signal_date=False`; these rows remain available for factor lookback and post-removal portfolio valuation.
+
+The membership history, per-security caches, and merged panels remain valid frozen inputs. A later audit found that the code used to build v1 advanced factor and return windows by per-security row position, which could bridge a missing security-level trading date. Current code uses exact positions in the global market calendar and leaves the result missing when the required security bar is absent. Therefore, v1's factor, evaluation, and backtest artifacts are historical outputs of commit `83a0547facb53c42be342fc402dc077868c49063`, not outputs of the current corrected calculation. Exact configuration, membership, cache-set, artifact, and archive identities are recorded in `snapshots/000300_ME_20210101_20260630_akshare_v1.toml`. The matching archive is `data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip`; Git LFS tracks this archive while expanded and generated `data/` contents remain ignored. After cloning, run `git lfs pull` and extract the archive into the project's `data/` directory because the archive root directly contains `market/`, `universe/`, `factors/`, and `reports/`. Never overwrite a frozen snapshot in place. Create a new snapshot identifier and manifest whenever source data, configuration, or calculation code changes.
+
+AKShare's constituent interface still provides only a current snapshot and cannot reconstruct monthly historical membership. Exact reproduction of all v1 artifacts requires the manifest's `project_commit`. With current code, starting from the audited membership file, use the following sequence and freeze the regenerated outputs under a new snapshot identifier after the code has been committed:
 
 ```powershell
-uv run python main.py --build-universe-history
 uv run python main.py --build-market-history
-uv run python main.py --run-market-history --with-evaluation --with-backtest
+uv run python main.py --build-execution-history
+uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest
 ```
 
-The market-history build command must be rerun until all per-security caches are complete. Existing reports use the legacy data convention and must not be represented as reflecting the corrected index-removal treatment.
+When using a provider that supports historical constituent snapshots, run `--build-universe-history` first. Each history-build command must be rerun until all per-security caches are complete before generating reports or creating a new frozen snapshot.
 
 ## Development Validation
 

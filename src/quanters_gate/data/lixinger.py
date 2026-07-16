@@ -7,13 +7,15 @@ from types import TracebackType
 import pandas as pd
 import requests
 
+from quanters_gate.data.dates import normalize_required_trade_dates
 from quanters_gate.data.provider import MarketDataProvider
 from quanters_gate.paths import PROJECT_ROOT
-from quanters_gate.validation import require_positive_finite, validate_date_range
+from quanters_gate.validation import require_columns, require_positive_finite, validate_date_range
 
 LIXINGER_INDEX_CONSTITUENTS_URL = "https://open.lixinger.com/api/cn/index/constituents"
 LIXINGER_INDEX_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/index/candlestick"
 LIXINGER_COMPANY_CANDLESTICK_URL = "https://open.lixinger.com/api/cn/company/candlestick"
+SUPPORTED_PRICE_TYPES = frozenset({"lxr_fc_rights", "ex_rights"})
 
 
 class LixingerClient(MarketDataProvider):
@@ -144,9 +146,13 @@ class LixingerClient(MarketDataProvider):
         data = pd.DataFrame(records)
         if data.empty or "date" not in data.columns:
             raise RuntimeError(f"指数 {index_code} 没有返回交易日期。")
-        data["date"] = pd.to_datetime(data["date"], errors="coerce")
-        if data["date"].isna().any():
-            raise ValueError(f"指数 {index_code} 返回了无效交易日期。")
+        data["date"] = normalize_required_trade_dates(
+            data["date"],
+            f"指数 {index_code} 的日线",
+        )
+        data = data.loc[data["date"].between(start, end)].copy()
+        if data.empty:
+            raise ValueError(f"指数 {index_code} 在请求区间内没有交易日期。")
         return data.sort_values("date").reset_index(drop=True)
 
     def fetch_daily_bars(
@@ -158,6 +164,8 @@ class LixingerClient(MarketDataProvider):
     ) -> pd.DataFrame:
         # 按明确的价格口径获取个股日线。
         start, end = validate_date_range(start_date, end_date)
+        if price_type not in SUPPORTED_PRICE_TYPES:
+            raise ValueError(f"理杏仁不支持项目价格口径：{price_type}")
         records = self._post(
             LIXINGER_COMPANY_CANDLESTICK_URL,
             {
@@ -172,16 +180,14 @@ class LixingerClient(MarketDataProvider):
 
         data = pd.DataFrame(records).rename(columns={"to_r": "turnover"})
         required = ["date", "open", "close", "high", "low", "volume", "amount"]
-        missing = set(required).difference(data.columns)
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise ValueError(f"股票 {symbol} 的日线缺少字段：{names}")
+        require_columns(data, required, f"股票 {symbol} 的日线")
 
         data["symbol"] = symbol
         data["price_type"] = price_type
-        data["date"] = pd.to_datetime(data["date"], errors="coerce")
-        if data["date"].isna().any():
-            raise ValueError(f"股票 {symbol} 返回了无效交易日期。")
+        data["date"] = normalize_required_trade_dates(data["date"], f"股票 {symbol} 的日线")
+        data = data.loc[data["date"].between(start, end)].copy()
+        if data.empty:
+            raise ValueError(f"股票 {symbol} 在请求区间内没有日线数据。")
         for column in [*required[1:], "turnover"]:
             if column in data.columns:
                 data[column] = pd.to_numeric(data[column], errors="coerce")

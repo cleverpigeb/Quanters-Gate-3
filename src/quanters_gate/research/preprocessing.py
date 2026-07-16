@@ -4,13 +4,22 @@ from collections.abc import Sequence
 
 import pandas as pd
 
-from quanters_gate.validation import require_columns, require_positive_finite
+from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.universe import normalize_symbol_values
+from quanters_gate.validation import (
+    require_columns,
+    require_positive_finite,
+    require_unique_rows,
+)
 
 REQUIRED_ID_COLUMNS = ("date", "symbol")
 MAD_TO_STANDARD_DEVIATION = 1.4826
 
 
-def _validate_factor_panel(data: pd.DataFrame, factor_columns: Sequence[str]) -> list[str]:
+def _prepare_factor_panel(
+    data: pd.DataFrame,
+    factor_columns: Sequence[str],
+) -> tuple[pd.DataFrame, list[str]]:
     columns = list(factor_columns)
     if not columns:
         raise ValueError("因子列不能为空。")
@@ -18,32 +27,11 @@ def _validate_factor_panel(data: pd.DataFrame, factor_columns: Sequence[str]) ->
         raise ValueError("因子列包含重复项。")
     require_columns(data, REQUIRED_ID_COLUMNS, "因子面板")
     require_columns(data, columns, "因子面板")
-    return columns
-
-
-def winsorize_mad(series: pd.Series, mad_scale: float = 3.0) -> pd.Series:
-    # 使用中位数绝对偏差缩尾，同时保留缺失值。
-    require_positive_finite(mad_scale, "MAD 缩尾倍数")
-    numeric = pd.to_numeric(series, errors="coerce")
-    valid = numeric.dropna()
-    if len(valid) < 3:
-        return numeric
-
-    median = valid.median()
-    mad = (valid - median).abs().median()
-    if pd.isna(mad) or mad == 0:
-        return numeric
-    robust_std = MAD_TO_STANDARD_DEVIATION * mad
-    return numeric.clip(median - mad_scale * robust_std, median + mad_scale * robust_std)
-
-
-def zscore(series: pd.Series) -> pd.Series:
-    # 使用总体标准差计算 z-score，并稳定处理常数截面。
-    numeric = pd.to_numeric(series, errors="coerce")
-    std = numeric.std(ddof=0)
-    if pd.isna(std) or std == 0:
-        return numeric * 0.0
-    return (numeric - numeric.mean()) / std
+    result = data.copy()
+    result["date"] = normalize_required_trade_dates(result["date"], "因子面板")
+    result["symbol"] = normalize_symbol_values(result["symbol"], "因子面板")
+    require_unique_rows(result, REQUIRED_ID_COLUMNS, "因子面板")
+    return result, columns
 
 
 def preprocess_factors(
@@ -53,8 +41,8 @@ def preprocess_factors(
 ) -> pd.DataFrame:
     # 按交易日批量执行 MAD 去极值和 z-score 标准化。
     require_positive_finite(mad_scale, "MAD 缩尾倍数")
-    columns = _validate_factor_panel(data, factor_columns)
-    result = data.copy().sort_values(list(REQUIRED_ID_COLUMNS)).reset_index(drop=True)
+    result, columns = _prepare_factor_panel(data, factor_columns)
+    result = result.sort_values(list(REQUIRED_ID_COLUMNS)).reset_index(drop=True)
     numeric = result[columns].apply(pd.to_numeric, errors="coerce")
     dates = result["date"]
 
@@ -85,7 +73,7 @@ def build_preprocess_summary(
     factor_columns: Sequence[str],
 ) -> pd.DataFrame:
     # 汇总各因子的缺失率和横截面覆盖情况。
-    columns = _validate_factor_panel(data, factor_columns)
+    data, columns = _prepare_factor_panel(data, factor_columns)
     rows: list[dict[str, object]] = []
     for column in columns:
         series = data[column]

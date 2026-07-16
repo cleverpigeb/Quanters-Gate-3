@@ -9,6 +9,7 @@ description = "面向 A 股个股的可复现多因子研究流水线"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "akshare>=1.18.40",
     "numpy>=2.0.0",
     "pandas>=3.0.3",
     "requests>=2.32.0",
