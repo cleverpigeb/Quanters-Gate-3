@@ -249,8 +249,8 @@ def _load_data_config(data: Mapping[str, object]) -> DataConfig:
         "execution_price_type",
         "data.execution_price_type",
     )
-    if provider != "lixinger":
-        raise ValueError("当前仅支持理杏仁数据源，data.provider 必须为 lixinger。")
+    if provider not in {"akshare", "lixinger"}:
+        raise ValueError("data.provider 仅支持 akshare 或 lixinger。")
     if research_price_type != "lxr_fc_rights":
         raise ValueError("研究价格必须使用前复权口径 lxr_fc_rights。")
     if execution_price_type != "ex_rights":

@@ -20,7 +20,7 @@ market_fetch_batch_size = 12
 
 # 数据来源与研究、执行价格口径。
 [data]
-provider = "lixinger"
+provider = "akshare"
 research_price_type = "lxr_fc_rights"
 execution_price_type = "ex_rights"
 

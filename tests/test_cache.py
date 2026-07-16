@@ -96,11 +96,102 @@ def test_cache_metadata_records_content_identity(tmp_path: Path) -> None:
     cache_path = tmp_path / "000001.csv"
     metadata = json.loads((tmp_path / "000001.meta.json").read_text(encoding="utf-8"))
 
-    assert metadata["schema_version"] == 1
+    assert metadata["schema_version"] == 2
     assert metadata["provider"] == "lixinger"
+    assert metadata["requested_start"] == "2024-01-01"
+    assert metadata["requested_end"] == "2024-01-31"
+    assert metadata["observed_start"] == "2024-01-01"
+    assert metadata["observed_end"] == "2024-01-31"
     assert metadata["row_count"] == 2
     assert metadata["content_sha256"] == calculate_sha256(cache_path)
     assert datetime.fromisoformat(metadata["built_at"]).tzinfo is not None
+
+
+def test_cache_records_and_validates_optional_data_source(tmp_path: Path) -> None:
+    class SourceClient(CacheClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            data = super().fetch_daily_bars(symbol, start_date, end_date, price_type)
+            data["data_source"] = "sina"
+            return data
+
+    client = SourceClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+    metadata = json.loads((tmp_path / "000001.meta.json").read_text(encoding="utf-8"))
+    cached = pd.read_csv(tmp_path / "000001.csv", dtype={"symbol": "string"})
+    cached["data_source"] = "eastmoney"
+    cached.to_csv(tmp_path / "000001.csv", index=False)
+    metadata["content_sha256"] = calculate_sha256(tmp_path / "000001.csv")
+    (tmp_path / "000001.meta.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+
+    assert metadata["data_source"] == "sina"
+    assert progress["fetched"] == 1
+
+
+def test_akshare_refetches_legacy_cache_without_data_source(tmp_path: Path) -> None:
+    class LegacyAkShareClient(CacheClient):
+        provider_name = "akshare"
+
+    class SourceAkShareClient(LegacyAkShareClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            data = super().fetch_daily_bars(symbol, start_date, end_date, price_type)
+            data["data_source"] = "eastmoney"
+            return data
+
+    legacy = LegacyAkShareClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        legacy,
+        1,
+        PRICE_TYPE,
+    )
+    updated = SourceAkShareClient()
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        updated,
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["fetched"] == 1
+    assert updated.calls == 1
 
 
 def test_cache_refetches_when_requested_start_expands(tmp_path: Path) -> None:
@@ -218,6 +309,85 @@ def test_cache_refetches_when_csv_content_hash_changes(tmp_path: Path) -> None:
 
     assert progress["fetched"] == 1
     assert client.calls == 2
+
+
+def test_cache_refetches_when_observed_date_range_disagrees_with_metadata(tmp_path: Path) -> None:
+    client = CacheClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+    cache_path = tmp_path / "000001.csv"
+    metadata_path = tmp_path / "000001.meta.json"
+    cached = pd.read_csv(cache_path, dtype={"symbol": "string"})
+    cached.loc[0, "date"] = "2024-01-15"
+    cached.to_csv(cache_path, index=False)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["content_sha256"] = calculate_sha256(cache_path)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["fetched"] == 1
+    assert client.calls == 2
+
+
+def test_cache_reuses_audited_post_listing_history(tmp_path: Path) -> None:
+    class PostListingClient(CacheClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            self.calls += 1
+            return pd.DataFrame(
+                {
+                    "date": ["2024-01-15", end_date],
+                    "symbol": [symbol, symbol],
+                    "price_type": [price_type, price_type],
+                }
+            )
+
+    client = PostListingClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+    metadata = json.loads((tmp_path / "000001.meta.json").read_text(encoding="utf-8"))
+
+    assert progress["fetched"] == 0
+    assert client.calls == 1
+    assert metadata["observed_start"] == "2024-01-15"
+    assert metadata["observed_end"] == "2024-01-31"
 
 
 def test_cache_refetches_after_metadata_commit_failure(tmp_path: Path, monkeypatch) -> None:

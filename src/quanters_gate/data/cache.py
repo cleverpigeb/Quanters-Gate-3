@@ -11,7 +11,8 @@ from quanters_gate.data.provider import DailyBarProvider
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
+DATA_SOURCE_COLUMN = "data_source"
 
 
 def fetch_universe_daily_bars(
@@ -61,6 +62,8 @@ def _cache_covers_date_range(
         requested_end = pd.Timestamp(end_date).normalize()
         cached_start = pd.Timestamp(metadata["requested_start"]).normalize()
         cached_end = pd.Timestamp(metadata["requested_end"]).normalize()
+        observed_start = pd.Timestamp(metadata["observed_start"]).normalize()
+        observed_end = pd.Timestamp(metadata["observed_end"]).normalize()
         if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
             return False
         if metadata.get("provider") != provider_name:
@@ -72,7 +75,7 @@ def _cache_covers_date_range(
 
         cached = pd.read_csv(
             file_path,
-            usecols=["date", "symbol", "price_type"],
+            usecols=lambda column: column in {"date", "symbol", "price_type", DATA_SOURCE_COLUMN},
             dtype={"symbol": "string", "price_type": "string"},
         )
         if cached.empty:
@@ -82,11 +85,24 @@ def _cache_covers_date_range(
         if metadata.get("content_sha256") != calculate_sha256(file_path):
             return False
         dates = normalize_trade_dates(cached["date"])
+        observed_dates_match = dates.min() == observed_start and dates.max() == observed_end
         symbols_match = cached["symbol"].notna().all() and cached["symbol"].eq(file_path.stem).all()
         price_types_match = (
             cached["price_type"].notna().all() and cached["price_type"].eq(price_type).all()
         )
-        return bool(dates.notna().all() and symbols_match and price_types_match)
+        source_matches = True
+        if DATA_SOURCE_COLUMN in cached.columns:
+            sources = cached[DATA_SOURCE_COLUMN].astype("string").dropna().unique().tolist()
+            source_matches = len(sources) == 1 and metadata.get(DATA_SOURCE_COLUMN) == sources[0]
+        elif provider_name == "akshare" or DATA_SOURCE_COLUMN in metadata:
+            source_matches = False
+        return bool(
+            dates.notna().all()
+            and observed_dates_match
+            and symbols_match
+            and price_types_match
+            and source_matches
+        )
     except KeyError, OSError, TypeError, ValueError, json.JSONDecodeError, pd.errors.ParserError:
         return False
 
@@ -109,8 +125,15 @@ def _write_cache(
         raise ValueError(f"行情缓存包含不属于股票 {file_path.stem} 的记录。")
     if price_types.isna().any() or not price_types.eq(price_type).all():
         raise ValueError("行情缓存的价格口径与请求不一致。")
-    if normalize_trade_dates(bars["date"]).isna().any():
+    dates = normalize_trade_dates(bars["date"])
+    if dates.isna().any():
         raise ValueError("行情缓存包含无效交易日期。")
+    data_source: str | None = None
+    if DATA_SOURCE_COLUMN in bars.columns:
+        sources = bars[DATA_SOURCE_COLUMN].astype("string").dropna().unique().tolist()
+        if len(sources) != 1:
+            raise ValueError("行情缓存必须包含唯一且非空的数据来源标记。")
+        data_source = sources[0]
 
     metadata_path = _metadata_path(file_path)
     atomic_write_csv(bars, file_path)
@@ -120,11 +143,15 @@ def _write_cache(
         "provider": provider_name,
         "requested_start": start.strftime("%Y-%m-%d"),
         "requested_end": end.strftime("%Y-%m-%d"),
+        "observed_start": dates.min().strftime("%Y-%m-%d"),
+        "observed_end": dates.max().strftime("%Y-%m-%d"),
         "price_type": price_type,
         "row_count": len(bars),
         "content_sha256": calculate_sha256(file_path),
         "built_at": datetime.now(UTC).isoformat(),
     }
+    if data_source is not None:
+        metadata[DATA_SOURCE_COLUMN] = data_source
     atomic_write_json(metadata, metadata_path)
 
 

@@ -79,6 +79,15 @@ def test_load_project_config_rejects_invalid_price_convention(tmp_path: Path) ->
         load_project_config(config_path)
 
 
+def test_load_project_config_accepts_akshare(tmp_path: Path) -> None:
+    config_path = tmp_path / "akshare.toml"
+    config_path.write_text(
+        VALID_CONFIG.replace('provider = "lixinger"', 'provider = "akshare"'), encoding="utf-8"
+    )
+
+    assert load_project_config(config_path).data.provider == "akshare"
+
+
 def test_load_project_config_rejects_malformed_toml(tmp_path: Path) -> None:
     config_path = tmp_path / "invalid.toml"
     config_path.write_text("[research\n", encoding="utf-8")

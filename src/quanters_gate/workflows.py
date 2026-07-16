@@ -222,7 +222,11 @@ def _build_market_history(
 
     if progress["remaining"]:
         completed = progress["cached"] + progress["fetched"]
-        print(f"已缓存 {completed}/{progress['total']} 只股票的{label}，请再次运行继续。")
+        print(
+            f"本次新缓存 {progress['fetched']} 只、已有有效缓存 {progress['cached']} 只、"
+            f"失败 {progress['failed']} 只；当前已完成 {completed}/{progress['total']} 只股票的"
+            f"{label}，请再次运行继续。"
+        )
         return
 
     full_history = load_cached_daily_bars(cache_dir, symbols)

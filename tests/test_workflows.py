@@ -9,7 +9,7 @@ from quanters_gate import workflows
 
 
 class EmptySnapshotProvider:
-    provider_name = "lixinger"
+    provider_name = "akshare"
 
     def __init__(self) -> None:
         self.closed = False
@@ -146,7 +146,7 @@ def test_workflow_rejects_provider_that_disagrees_with_config() -> None:
         end="2024-01-31",
     )
 
-    with pytest.raises(ValueError, match="配置的数据源 lixinger 与注入的数据源 offline 不一致"):
+    with pytest.raises(ValueError, match="配置的数据源 akshare 与注入的数据源 offline 不一致"):
         workflows.build_universe_history(args, lambda: provider)
 
     assert provider.closed is True
