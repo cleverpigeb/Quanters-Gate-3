@@ -12,18 +12,22 @@ from quanters_gate.backtest.execution import add_next_open_execution_returns
 from quanters_gate.backtest.portfolio import run_monthly_top_n_backtest, summarize_backtest
 from quanters_gate.data.cache import (
     cache_daily_bar_batch,
-    fetch_universe_daily_bars,
     load_cached_daily_bars,
 )
 from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
-from quanters_gate.data.dates import normalize_trade_dates
-from quanters_gate.data.provider import MarketDataProvider, MarketDataProviderFactory
+from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.provider import (
+    MarketDataProvider,
+    MarketDataProviderFactory,
+    fetch_universe_daily_bars,
+)
 from quanters_gate.data.universe import (
     ELIGIBILITY_COLUMN,
     attach_membership_eligibility,
     build_index_stock_pool,
     build_index_stock_pool_history,
     monthly_rebalance_dates,
+    normalize_membership_history,
     normalize_symbols,
     select_eligible_signals,
 )
@@ -51,7 +55,12 @@ from quanters_gate.research.preprocessing import build_preprocess_summary, prepr
 from quanters_gate.research.returns import add_forward_returns
 from quanters_gate.settings import PROJECT_CONFIG, RunConfig, serialize_run_config
 from quanters_gate.storage import atomic_write_csv, atomic_write_text
-from quanters_gate.validation import require_columns, require_positive, validate_date_range
+from quanters_gate.validation import (
+    require_columns,
+    require_positive,
+    validate_date_range,
+    validate_non_overlapping_sample,
+)
 
 CSV_ENCODING = "utf-8-sig"
 
@@ -75,7 +84,12 @@ def _normalized_research_dates(args: Namespace) -> tuple[str, str]:
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
-def _resolve_run_config(args: Namespace) -> RunConfig:
+def _normalized_single_date(value: str) -> str:
+    date, _ = validate_date_range(value, value)
+    return date.strftime("%Y-%m-%d")
+
+
+def _resolve_run_config(args: Namespace, resolved_symbols: list[str]) -> RunConfig:
     start_date, end_date = _normalized_research_dates(args)
     if args.run_market_history:
         mode = "historical_market"
@@ -86,7 +100,7 @@ def _resolve_run_config(args: Namespace) -> RunConfig:
     return RunConfig(
         schema_version=PROJECT_CONFIG.schema_version,
         mode=mode,
-        universe_date=args.universe_date,
+        universe_date=_normalized_single_date(args.universe_date) if args.universe_date else None,
         with_preprocess=any(
             (
                 args.with_preprocess,
@@ -108,7 +122,7 @@ def _resolve_run_config(args: Namespace) -> RunConfig:
         ),
         universe=replace(
             PROJECT_CONFIG.universe,
-            symbols=tuple(normalize_symbols(args.symbols)),
+            symbols=tuple(normalize_symbols(resolved_symbols)),
             snapshot_batch_size=args.max_universe_snapshots,
             market_fetch_batch_size=args.max_market_symbols,
         ),
@@ -161,11 +175,8 @@ def build_universe_history(
             if snapshot_path.exists():
                 try:
                     snapshot = pd.read_csv(snapshot_path, dtype={"symbol": "string"})
-                except OSError, pd.errors.ParserError:
-                    missing_dates.append(date)
-                    continue
-                required = {"symbol", "name", "market", "area_code"}
-                if snapshot.empty or not required.issubset(snapshot.columns):
+                    build_index_stock_pool(snapshot, universe.index_code, date)
+                except OSError, ValueError, pd.errors.ParserError:
                     missing_dates.append(date)
                     continue
                 snapshots[date] = snapshot
@@ -179,6 +190,7 @@ def build_universe_history(
             )
             if snapshot.empty:
                 raise RuntimeError(f"指数在 {date:%Y-%m-%d} 的成分快照为空，请稍后重试。")
+            build_index_stock_pool(snapshot, universe.index_code, date)
             _write_csv(snapshot, snapshot_dir / f"{date:%Y-%m-%d}.csv")
             snapshots[date] = snapshot
 
@@ -206,8 +218,12 @@ def _build_market_history(
         raise FileNotFoundError("请先构建月度指数成分历史。")
     require_positive(args.max_market_symbols, "单批最大行情股票数")
 
-    membership = pd.read_csv(membership_path, dtype={"symbol": "string"})
-    require_columns(membership, ("as_of_date", "symbol"), "成分历史")
+    membership = normalize_membership_history(
+        pd.read_csv(membership_path, dtype={"index_code": "string", "symbol": "string"})
+    )
+    require_columns(membership, ("index_code",), "成分历史")
+    if not membership["index_code"].eq(PROJECT_CONFIG.universe.index_code).all():
+        raise ValueError("成分历史包含与当前配置不一致的指数代码。")
     symbols = normalize_symbols(sorted(membership["symbol"].dropna().unique().tolist()))
     with _provider_session(provider_factory) as provider:
         progress = cache_daily_bar_batch(
@@ -271,6 +287,18 @@ def _load_historical_panel() -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError("请先构建历史研究行情面板。")
     panel = pd.read_csv(path, dtype={"symbol": "string"})
+    require_columns(panel, ("price_type",), "历史研究行情面板")
+    price_types = panel["price_type"].astype("string")
+    expected_price_type = PROJECT_CONFIG.data.research_price_type
+    if price_types.isna().any() or not price_types.eq(expected_price_type).all():
+        raise ValueError(f"历史研究行情面板必须全部使用 {expected_price_type} 价格口径。")
+    if PROJECT_CONFIG.data.provider == "akshare":
+        require_columns(panel, ("data_source",), "AKShare 历史研究行情面板")
+        data_sources = panel["data_source"].astype("string")
+        if data_sources.isna().any() or not data_sources.isin({"eastmoney", "sina"}).all():
+            raise ValueError("AKShare 历史研究行情面板包含无效或缺失的数据来源标记。")
+    elif "data_source" in panel.columns and panel["data_source"].notna().any():
+        raise ValueError("历史研究行情面板的数据来源与当前理杏仁配置不一致。")
     if ELIGIBILITY_COLUMN in panel.columns:
         return panel
 
@@ -294,19 +322,20 @@ def _load_pipeline_input(
 
     if args.universe_date:
         universe = PROJECT_CONFIG.universe
+        universe_date = _normalized_single_date(args.universe_date)
         with _provider_session(provider_factory) as provider:
             constituents = provider.fetch_index_constituents(
                 universe.index_code,
-                args.universe_date,
+                universe_date,
             )
             stock_pool = build_index_stock_pool(
                 constituents,
                 universe.index_code,
-                args.universe_date,
+                universe_date,
             )
             _write_csv(
                 stock_pool,
-                UNIVERSE_DIR / f"{universe.index_code}_{args.universe_date}.csv",
+                UNIVERSE_DIR / f"{universe.index_code}_{universe_date}.csv",
             )
             return fetch_universe_daily_bars(
                 stock_pool["symbol"].tolist(),
@@ -327,26 +356,12 @@ def _load_pipeline_input(
         )
 
 
-def _advanced_research_requested(args: Namespace) -> bool:
-    return any(
-        (
-            args.with_preprocess,
-            args.with_analysis,
-            args.with_evaluation,
-            args.with_backtest,
-            args.with_execution_backtest,
-        )
-    )
-
-
 def _filter_signal_date_range(data: pd.DataFrame, args: Namespace) -> pd.DataFrame:
     # 仅限制信号日期，因子回看和未来收益仍使用完整行情历史。
     require_columns(data, ("date",), "信号数据")
     start_date, end_date = _normalized_research_dates(args)
     result = data.copy()
-    result["date"] = normalize_trade_dates(result["date"])
-    if result["date"].isna().any():
-        raise ValueError("信号数据包含无效交易日期。")
+    result["date"] = normalize_required_trade_dates(result["date"], "信号数据")
     start = pd.Timestamp(start_date)
     end = pd.Timestamp(end_date)
     return result.loc[result["date"].between(start, end)].copy()
@@ -408,13 +423,13 @@ def run_research_pipeline(
     provider_factory: MarketDataProviderFactory,
 ) -> None:
     # 运行行情清洗、因子、评估和组合研究。
-    run_config = _resolve_run_config(args)
     raw_data = _load_pipeline_input(args, provider_factory)
     _write_csv(raw_data, MARKET_RAW_DIR / "daily_bars.csv")
 
     clean_data = clean_daily_bars(raw_data)
     if clean_data.empty:
         raise ValueError("行情清洗后没有可用于研究的记录。")
+    run_config = _resolve_run_config(args, clean_data["symbol"].drop_duplicates().tolist())
     _write_csv(clean_data, MARKET_PROCESSED_DIR / "daily_bars.csv")
     _write_csv(
         build_cleaning_summary(raw_data, clean_data),
@@ -423,7 +438,7 @@ def run_research_pipeline(
 
     factor_data = calculate_price_factors(clean_data)
     _write_csv(factor_data, FACTOR_RAW_DIR / "price_factors.csv")
-    if not _advanced_research_requested(args):
+    if not run_config.with_preprocess:
         _write_run_config(run_config)
         print("基础流水线已完成。使用 --with-preprocess 或 --with-analysis 生成研究输出。")
         return
@@ -506,6 +521,13 @@ def execute(
     # 根据命令行参数选择唯一的主工作流。
     validate_date_range(args.start, args.end)
     require_positive(args.horizon, "未来收益周期")
+    require_positive(args.max_universe_snapshots, "单批最大成分快照数")
+    require_positive(args.max_market_symbols, "单批最大行情股票数")
+    if args.with_analysis or args.with_evaluation:
+        validate_non_overlapping_sample(
+            args.horizon,
+            PROJECT_CONFIG.research.ic_sample_step,
+        )
     ensure_project_directories()
     if args.build_universe_history:
         build_universe_history(args, provider_factory)

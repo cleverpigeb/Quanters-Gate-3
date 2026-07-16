@@ -6,37 +6,20 @@ from pathlib import Path
 
 import pandas as pd
 
-from quanters_gate.data.dates import normalize_trade_dates
+from quanters_gate.data.dates import normalize_required_trade_dates, normalize_trade_dates
 from quanters_gate.data.provider import DailyBarProvider
+from quanters_gate.data.universe import normalize_symbols
 from quanters_gate.storage import atomic_write_csv, atomic_write_json, calculate_sha256
-from quanters_gate.validation import require_columns, require_positive, validate_date_range
+from quanters_gate.validation import (
+    require_columns,
+    require_positive,
+    require_unique_rows,
+    validate_date_range,
+)
 
 CACHE_SCHEMA_VERSION = 2
 DATA_SOURCE_COLUMN = "data_source"
-
-
-def fetch_universe_daily_bars(
-    symbols: list[str],
-    start_date: str,
-    end_date: str,
-    provider: DailyBarProvider,
-    price_type: str,
-) -> pd.DataFrame:
-    # 逐只获取行情，并保留其他请求成功的股票。
-    frames: list[pd.DataFrame] = []
-    failures: list[str] = []
-    for symbol in symbols:
-        try:
-            frames.append(provider.fetch_daily_bars(symbol, start_date, end_date, price_type))
-        except Exception as error:
-            failures.append(f"{symbol}：{error}")
-
-    if not frames:
-        details = "；".join(failures)
-        raise RuntimeError(f"未能获取任何股票行情。{details}")
-    if failures:
-        print("以下股票获取失败，已跳过：" + "；".join(failures))
-    return pd.concat(frames, ignore_index=True)
+AKSHARE_DATA_SOURCES = frozenset({"eastmoney", "sina"})
 
 
 def _metadata_path(file_path: Path) -> Path:
@@ -64,11 +47,14 @@ def _cache_covers_date_range(
         cached_end = pd.Timestamp(metadata["requested_end"]).normalize()
         observed_start = pd.Timestamp(metadata["observed_start"]).normalize()
         observed_end = pd.Timestamp(metadata["observed_end"]).normalize()
+        built_at = datetime.fromisoformat(metadata["built_at"])
         if metadata.get("schema_version") != CACHE_SCHEMA_VERSION:
             return False
         if metadata.get("provider") != provider_name:
             return False
         if metadata.get("price_type") != price_type:
+            return False
+        if built_at.tzinfo is None:
             return False
         if cached_start > requested_start or cached_end < requested_end:
             return False
@@ -86,6 +72,7 @@ def _cache_covers_date_range(
             return False
         dates = normalize_trade_dates(cached["date"])
         observed_dates_match = dates.min() == observed_start and dates.max() == observed_end
+        unique_dates = not dates.duplicated().any()
         symbols_match = cached["symbol"].notna().all() and cached["symbol"].eq(file_path.stem).all()
         price_types_match = (
             cached["price_type"].notna().all() and cached["price_type"].eq(price_type).all()
@@ -94,11 +81,14 @@ def _cache_covers_date_range(
         if DATA_SOURCE_COLUMN in cached.columns:
             sources = cached[DATA_SOURCE_COLUMN].astype("string").dropna().unique().tolist()
             source_matches = len(sources) == 1 and metadata.get(DATA_SOURCE_COLUMN) == sources[0]
+            if provider_name == "akshare":
+                source_matches = source_matches and sources[0] in AKSHARE_DATA_SOURCES
         elif provider_name == "akshare" or DATA_SOURCE_COLUMN in metadata:
             source_matches = False
         return bool(
             dates.notna().all()
             and observed_dates_match
+            and unique_dates
             and symbols_match
             and price_types_match
             and source_matches
@@ -119,24 +109,30 @@ def _write_cache(
     if bars.empty:
         raise ValueError("不能写入空的行情缓存。")
     start, end = validate_date_range(start_date, end_date)
-    symbols = bars["symbol"].astype("string")
-    price_types = bars["price_type"].astype("string")
+    cached = bars.copy()
+    cached["date"] = normalize_required_trade_dates(cached["date"], "行情缓存")
+    cached = cached.sort_values("date").reset_index(drop=True)
+    require_unique_rows(cached, ("date", "symbol"), "行情缓存")
+    symbols = cached["symbol"].astype("string")
+    price_types = cached["price_type"].astype("string")
     if symbols.isna().any() or not symbols.eq(file_path.stem).all():
         raise ValueError(f"行情缓存包含不属于股票 {file_path.stem} 的记录。")
     if price_types.isna().any() or not price_types.eq(price_type).all():
         raise ValueError("行情缓存的价格口径与请求不一致。")
-    dates = normalize_trade_dates(bars["date"])
-    if dates.isna().any():
-        raise ValueError("行情缓存包含无效交易日期。")
+    dates = cached["date"]
+    if not dates.between(start, end).all():
+        raise ValueError("行情缓存包含请求区间之外的交易日期。")
     data_source: str | None = None
-    if DATA_SOURCE_COLUMN in bars.columns:
-        sources = bars[DATA_SOURCE_COLUMN].astype("string").dropna().unique().tolist()
+    if DATA_SOURCE_COLUMN in cached.columns:
+        sources = cached[DATA_SOURCE_COLUMN].astype("string").dropna().unique().tolist()
         if len(sources) != 1:
             raise ValueError("行情缓存必须包含唯一且非空的数据来源标记。")
         data_source = sources[0]
+    if provider_name == "akshare" and data_source not in AKSHARE_DATA_SOURCES:
+        raise ValueError("AKShare 行情缓存必须标记 eastmoney 或 sina 数据来源。")
 
     metadata_path = _metadata_path(file_path)
-    atomic_write_csv(bars, file_path)
+    atomic_write_csv(cached, file_path)
 
     metadata = {
         "schema_version": CACHE_SCHEMA_VERSION,
@@ -146,7 +142,7 @@ def _write_cache(
         "observed_start": dates.min().strftime("%Y-%m-%d"),
         "observed_end": dates.max().strftime("%Y-%m-%d"),
         "price_type": price_type,
-        "row_count": len(bars),
+        "row_count": len(cached),
         "content_sha256": calculate_sha256(file_path),
         "built_at": datetime.now(UTC).isoformat(),
     }
@@ -167,6 +163,7 @@ def cache_daily_bar_batch(
     # 缓存有限数量的缺失行情，使批量获取可以安全续跑。
     require_positive(max_symbols, "单批最大股票数")
     validate_date_range(start_date, end_date)
+    symbols = normalize_symbols(symbols)
     directory = Path(cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -212,8 +209,7 @@ def cache_daily_bar_batch(
 
 def load_cached_daily_bars(cache_dir: str | Path, symbols: list[str]) -> pd.DataFrame:
     # 将逐股票缓存合并为长表。
-    if not symbols:
-        raise ValueError("缓存股票列表不能为空。")
+    symbols = normalize_symbols(symbols)
     directory = Path(cache_dir)
     missing = [symbol for symbol in symbols if not (directory / f"{symbol}.csv").exists()]
     if missing:

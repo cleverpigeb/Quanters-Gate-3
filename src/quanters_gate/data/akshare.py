@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pandas as pd
 import requests
 
-from quanters_gate.data.dates import normalize_trade_dates
+from quanters_gate.data.dates import normalize_required_trade_dates
 from quanters_gate.data.provider import MarketDataProvider
 from quanters_gate.validation import require_columns, validate_date_range
 
@@ -37,12 +37,8 @@ def _load_akshare() -> AkShareApi:
         raise RuntimeError("未安装 akshare，请先执行 uv sync 安装项目依赖。") from None
 
 
-def _format_api_date(value: str) -> str:
-    return pd.Timestamp(value).strftime("%Y%m%d")
-
-
-def _naive_trade_date(value: pd.Timestamp) -> pd.Timestamp:
-    return value.tz_localize(None).normalize()
+def _format_api_date(value: pd.Timestamp) -> str:
+    return value.strftime("%Y%m%d")
 
 
 def _sina_symbol(symbol: str) -> str:
@@ -74,9 +70,10 @@ def _normalize_bars(
     require_columns(renamed, _BAR_COLUMNS[:-1], f"股票 {symbol} 的 AKShare 日线")
     if "turnover" not in renamed.columns:
         renamed["turnover"] = pd.NA
-    renamed["date"] = normalize_trade_dates(renamed["date"])
-    if renamed["date"].isna().any():
-        raise ValueError(f"股票 {symbol} 的 AKShare 日线包含无效交易日期。")
+    renamed["date"] = normalize_required_trade_dates(
+        renamed["date"],
+        f"股票 {symbol} 的 AKShare 日线",
+    )
     renamed["symbol"] = symbol
     renamed["price_type"] = price_type
     renamed[DATA_SOURCE_COLUMN] = data_source
@@ -110,8 +107,8 @@ class AkShareClient(MarketDataProvider):
             return self._api.stock_zh_a_hist(
                 symbol=symbol,
                 period="daily",
-                start_date=_format_api_date(start.strftime("%Y-%m-%d")),
-                end_date=_format_api_date(end.strftime("%Y-%m-%d")),
+                start_date=_format_api_date(start),
+                end_date=_format_api_date(end),
                 adjust=adjust,
                 timeout=30,
             )
@@ -136,8 +133,8 @@ class AkShareClient(MarketDataProvider):
             with patch.object(requests, "get", new=get_with_timeout):
                 return self._api.stock_zh_a_daily(
                     symbol=_sina_symbol(symbol),
-                    start_date=_format_api_date(start.strftime("%Y-%m-%d")),
-                    end_date=_format_api_date(end.strftime("%Y-%m-%d")),
+                    start_date=_format_api_date(start),
+                    end_date=_format_api_date(end),
                     adjust=adjust,
                 )
         except Exception as error:
@@ -152,7 +149,6 @@ class AkShareClient(MarketDataProvider):
     ) -> pd.DataFrame:
         # 依次尝试东财和新浪的完整 A 股日线接口。
         start, end = validate_date_range(start_date, end_date)
-        start, end = _naive_trade_date(start), _naive_trade_date(end)
         try:
             adjust = _PRICE_TYPE_TO_ADJUST[price_type]
         except KeyError:
@@ -185,13 +181,12 @@ class AkShareClient(MarketDataProvider):
     ) -> pd.DataFrame:
         # 获取指数日线，用于识别每月最后一个真实交易日。
         start, end = validate_date_range(start_date, end_date)
-        start, end = _naive_trade_date(start), _naive_trade_date(end)
         try:
             data = self._api.index_zh_a_hist(
                 symbol=index_code,
                 period="daily",
-                start_date=_format_api_date(start.strftime("%Y-%m-%d")),
-                end_date=_format_api_date(end.strftime("%Y-%m-%d")),
+                start_date=_format_api_date(start),
+                end_date=_format_api_date(end),
             )
         except Exception as error:
             raise RuntimeError(f"AKShare 获取指数 {index_code} 日线失败：{error}") from None
@@ -199,9 +194,10 @@ class AkShareClient(MarketDataProvider):
             raise ValueError(f"指数 {index_code} 没有返回 AKShare 日线数据。")
         result = data.rename(columns={"日期": "date"}).copy()
         require_columns(result, ("date",), f"指数 {index_code} 的 AKShare 日线")
-        result["date"] = normalize_trade_dates(result["date"])
-        if result["date"].isna().any():
-            raise ValueError(f"指数 {index_code} 的 AKShare 日线包含无效交易日期。")
+        result["date"] = normalize_required_trade_dates(
+            result["date"],
+            f"指数 {index_code} 的 AKShare 日线",
+        )
         result = result.loc[result["date"].between(start, end)].sort_values("date")
         if result.empty:
             raise ValueError(f"指数 {index_code} 在请求区间内没有 AKShare 日线数据。")
@@ -210,7 +206,6 @@ class AkShareClient(MarketDataProvider):
     def fetch_index_constituents(self, index_code: str, as_of_date: str) -> pd.DataFrame:
         # 仅接受中证网站实际标注日期的快照，避免把当前成员伪装成历史成员。
         requested, _ = validate_date_range(as_of_date, as_of_date)
-        requested = _naive_trade_date(requested)
         try:
             data = self._api.index_stock_cons_csindex(symbol=index_code)
         except Exception as error:
@@ -231,7 +226,10 @@ class AkShareClient(MarketDataProvider):
             ("as_of_date", "symbol", "name", "market"),
             f"指数 {index_code} 的 AKShare 成分股",
         )
-        snapshot_dates = normalize_trade_dates(renamed["as_of_date"]).dropna().unique()
+        snapshot_dates = normalize_required_trade_dates(
+            renamed["as_of_date"],
+            f"指数 {index_code} 的 AKShare 成分股",
+        ).unique()
         if len(snapshot_dates) != 1:
             raise ValueError(f"指数 {index_code} 的 AKShare 成分股包含多个或无效快照日期。")
         snapshot_date = pd.Timestamp(snapshot_dates[0])

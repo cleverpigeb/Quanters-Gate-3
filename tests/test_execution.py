@@ -74,3 +74,70 @@ def test_execution_return_rejects_duplicate_signals() -> None:
 
     with pytest.raises(ValueError, match="重复记录"):
         add_next_open_execution_returns(signals, bars, horizon=1)
+
+
+@pytest.mark.parametrize("missing_date_index", [1, 2])
+def test_execution_return_does_not_bridge_a_missing_market_date(
+    missing_date_index: int,
+) -> None:
+    dates = pd.date_range("2024-01-01", periods=4, freq="B")
+    signals = pd.DataFrame({"date": [dates[0]], "symbol": ["000001"]})
+    target_bars = pd.DataFrame(
+        {
+            "date": dates.delete(missing_date_index),
+            "symbol": ["000001"] * 3,
+            "open": [10.0, 11.0, 12.0],
+            "is_tradable": [True] * 3,
+            "price_type": ["ex_rights"] * 3,
+        }
+    )
+    calendar_bars = pd.DataFrame(
+        {
+            "date": dates,
+            "symbol": ["000002"] * 4,
+            "open": [20.0, 21.0, 22.0, 23.0],
+            "is_tradable": [True] * 4,
+            "price_type": ["ex_rights"] * 4,
+        }
+    )
+
+    result = add_next_open_execution_returns(
+        signals,
+        pd.concat([target_bars, calendar_bars], ignore_index=True),
+        horizon=1,
+    )
+
+    assert pd.isna(result.loc[0, "execution_return"])
+
+
+def test_execution_return_rejects_duplicate_market_rows() -> None:
+    signals = pd.DataFrame({"date": ["2024-01-01"], "symbol": ["000001"]})
+    bars = pd.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01"],
+            "symbol": ["000001", "000001"],
+            "open": [10.0, 10.0],
+            "is_tradable": [True, True],
+            "price_type": ["ex_rights", "ex_rights"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="重复记录"):
+        add_next_open_execution_returns(signals, bars, horizon=1)
+
+
+def test_execution_return_rejects_a_signal_outside_the_execution_calendar() -> None:
+    signals = pd.DataFrame({"date": ["2024-01-06"], "symbol": ["000001"]})
+    bars = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-05", periods=3, freq="B"),
+            "symbol": ["000001"] * 3,
+            "open": [10.0, 11.0, 12.0],
+            "is_tradable": [True] * 3,
+            "price_type": ["ex_rights"] * 3,
+        }
+    )
+
+    result = add_next_open_execution_returns(signals, bars, horizon=1)
+
+    assert pd.isna(result.loc[0, "execution_return"])

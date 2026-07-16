@@ -4,6 +4,7 @@ import pytest
 from quanters_gate.data.universe import (
     ELIGIBILITY_COLUMN,
     attach_membership_eligibility,
+    build_index_stock_pool,
     build_index_stock_pool_history,
     monthly_rebalance_dates,
     normalize_symbols,
@@ -23,6 +24,11 @@ def test_monthly_rebalance_dates_use_last_real_trading_day() -> None:
         pd.Timestamp("2024-01-31"),
         pd.Timestamp("2024-02-29"),
     ]
+
+
+def test_monthly_rebalance_dates_reject_invalid_dates() -> None:
+    with pytest.raises(ValueError, match="无效交易日期"):
+        monthly_rebalance_dates(pd.Series(["2024-01-31", "无效日期"]))
 
 
 def test_history_combines_snapshots_and_handles_duplicates() -> None:
@@ -127,4 +133,44 @@ def test_eligibility_rejects_invalid_market_dates() -> None:
     membership = pd.DataFrame({"as_of_date": ["2024-01-31"], "symbol": ["000001"]})
 
     with pytest.raises(ValueError, match="无效交易日期"):
+        attach_membership_eligibility(market, membership)
+
+
+def test_stock_pool_rejects_missing_identity_fields() -> None:
+    constituents = pd.DataFrame(
+        {
+            "symbol": ["000001"],
+            "name": [None],
+            "market": ["a"],
+            "area_code": ["cn"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="缺失"):
+        build_index_stock_pool(constituents, "000300", "2024-01-31")
+
+
+def test_eligibility_rejects_duplicate_membership_records() -> None:
+    market = pd.DataFrame({"date": ["2024-01-31"], "symbol": ["000001"]})
+    membership = pd.DataFrame(
+        {
+            "as_of_date": ["2024-01-31", "2024-01-31"],
+            "symbol": ["000001", "000001"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="重复记录"):
+        attach_membership_eligibility(market, membership)
+
+
+def test_eligibility_rejects_duplicate_market_records() -> None:
+    market = pd.DataFrame(
+        {
+            "date": ["2024-01-31", "2024-01-31"],
+            "symbol": ["000001", "000001"],
+        }
+    )
+    membership = pd.DataFrame({"as_of_date": ["2024-01-31"], "symbol": ["000001"]})
+
+    with pytest.raises(ValueError, match="重复记录"):
         attach_membership_eligibility(market, membership)

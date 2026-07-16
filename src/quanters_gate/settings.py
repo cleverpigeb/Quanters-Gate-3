@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 from quanters_gate.paths import PROJECT_ROOT
 from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS
+from quanters_gate.validation import validate_non_overlapping_sample
 
 CONFIG_PATH = PROJECT_ROOT / "config" / "default.toml"
 
@@ -162,18 +163,21 @@ def _load_research_config(data: Mapping[str, object]) -> ResearchConfig:
     if start > end:
         raise ValueError("配置中的研究开始日期不能晚于结束日期。")
 
+    forward_days = _require_positive_integer(data, "forward_days", "research.forward_days")
+    ic_sample_step = _require_positive_integer(
+        data,
+        "ic_sample_step",
+        "research.ic_sample_step",
+    )
+    validate_non_overlapping_sample(forward_days, ic_sample_step)
     quantile_count = _require_positive_integer(data, "quantile_count", "research.quantile_count")
     if quantile_count < 2:
         raise ValueError("配置项 research.quantile_count 不能小于 2。")
     return ResearchConfig(
         start_date=start.isoformat(),
         end_date=end.isoformat(),
-        forward_days=_require_positive_integer(data, "forward_days", "research.forward_days"),
-        ic_sample_step=_require_positive_integer(
-            data,
-            "ic_sample_step",
-            "research.ic_sample_step",
-        ),
+        forward_days=forward_days,
+        ic_sample_step=ic_sample_step,
         quantile_count=quantile_count,
         random_seed=_require_non_negative_integer(data, "random_seed", "research.random_seed"),
     )
@@ -283,13 +287,16 @@ def _load_portfolio_config(data: Mapping[str, object]) -> PortfolioConfig:
         raise ValueError(f"配置包含尚未实现的组合因子：{names}")
     if not any(weight != 0 for weight in factor_weights.values()):
         raise ValueError("配置中的组合因子权重不能全部为零。")
+    one_way_cost_rate = _require_non_negative_number(
+        data,
+        "one_way_cost_rate",
+        "portfolio.one_way_cost_rate",
+    )
+    if one_way_cost_rate > 1:
+        raise ValueError("配置项 portfolio.one_way_cost_rate 不能大于 1。")
     return PortfolioConfig(
         top_n=_require_positive_integer(data, "top_n", "portfolio.top_n"),
-        one_way_cost_rate=_require_non_negative_number(
-            data,
-            "one_way_cost_rate",
-            "portfolio.one_way_cost_rate",
-        ),
+        one_way_cost_rate=one_way_cost_rate,
         factor_weights=MappingProxyType(factor_weights),
     )
 

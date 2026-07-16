@@ -5,18 +5,24 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from quanters_gate.data.universe import select_eligible_signals
-from quanters_gate.validation import require_columns, require_positive
+from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.universe import normalize_symbol_values, select_eligible_signals
+from quanters_gate.validation import (
+    require_columns,
+    require_positive,
+    require_unique_rows,
+    validate_non_overlapping_sample,
+)
 
 RANK_IC_COLUMNS = ["date", "factor", "rank_ic"]
 QUANTILE_RETURN_COLUMNS = ["date", "factor", "quantile", "forward_return"]
 
 
-def _validate_evaluation_input(
+def _prepare_evaluation_input(
     data: pd.DataFrame,
     factor_columns: Sequence[str],
     horizon: int,
-) -> tuple[list[str], str]:
+) -> tuple[pd.DataFrame, list[str], str]:
     require_positive(horizon, "未来收益周期")
     factors = list(factor_columns)
     if not factors:
@@ -24,8 +30,12 @@ def _validate_evaluation_input(
     if len(factors) != len(set(factors)):
         raise ValueError("因子列包含重复项。")
     target = f"forward_return_{horizon}d"
-    require_columns(data, ("date", target, *factors), "因子评估输入")
-    return factors, target
+    require_columns(data, ("date", "symbol", target, *factors), "因子评估输入")
+    prepared = data.copy()
+    prepared["date"] = normalize_required_trade_dates(prepared["date"], "因子评估输入")
+    prepared["symbol"] = normalize_symbol_values(prepared["symbol"], "因子评估输入")
+    require_unique_rows(prepared, ("date", "symbol"), "因子评估输入")
+    return select_eligible_signals(prepared), factors, target
 
 
 def _sampled_date_groups(
@@ -45,8 +55,8 @@ def calculate_rank_ic(
     sample_step: int,
 ) -> pd.DataFrame:
     # 计算非重叠横截面的 Spearman Rank IC。
-    factors, target = _validate_evaluation_input(data, factor_columns, horizon)
-    eligible = select_eligible_signals(data)
+    validate_non_overlapping_sample(horizon, sample_step)
+    eligible, factors, target = _prepare_evaluation_input(data, factor_columns, horizon)
     date_groups = _sampled_date_groups(eligible, sample_step)
 
     records: list[dict[str, object]] = []
@@ -85,10 +95,11 @@ def calculate_quantile_returns(
     sample_step: int,
 ) -> pd.DataFrame:
     # 在非重叠日期上计算等权因子分组收益。
-    factors, target = _validate_evaluation_input(data, factor_columns, horizon)
+    validate_non_overlapping_sample(horizon, sample_step)
+    eligible, factors, target = _prepare_evaluation_input(data, factor_columns, horizon)
+    require_positive(quantile_count, "分组数量")
     if quantile_count < 2:
         raise ValueError("分组数量至少为 2。")
-    eligible = select_eligible_signals(data)
     date_groups = _sampled_date_groups(eligible, sample_step)
 
     records: list[dict[str, object]] = []
@@ -132,6 +143,7 @@ def summarize_top_bottom_spreads(
     quantile_count: int,
 ) -> pd.DataFrame:
     # 汇总最高组与最低组的收益差。
+    require_positive(quantile_count, "分组数量")
     if quantile_count < 2:
         raise ValueError("分组数量至少为 2。")
     columns = ["factor", "low_quantile_return", "high_quantile_return", "top_bottom_spread"]

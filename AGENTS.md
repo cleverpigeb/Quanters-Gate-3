@@ -18,19 +18,19 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `paths.py`: All project data paths.
 - `validation.py`: Shared input validation across subpackages.
 - `storage.py`: Shared atomic CSV/JSON/text writers and SHA-256 file hashing.
-- `data/provider.py`: Provider protocols and the factory type used by data workflows.
+- `data/provider.py`: Provider protocols, the factory type, and bounded sequential multi-security retrieval.
 - `data/akshare.py`: AKShare field conversion, price-convention mapping, and source-snapshot validation.
 - `data/lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
 - `data/cache.py`: Per-security caches with auditable metadata and content-identity checks.
 - `data/cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
-- `data/dates.py`: Centralized conversion from external timestamps to Shanghai trading dates.
+- `data/dates.py`: Shanghai trading-date normalization and global-calendar position mapping.
 - `data/universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
-- `research/factors.py`: 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
+- `research/factors.py`: Calendar-aligned 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
 - `research/preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
-- `research/returns.py`: Forward close-to-close research returns.
+- `research/returns.py`: Calendar-aligned forward close-to-close research returns.
 - `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
 - `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
-- `backtest/execution.py`: Next-open execution returns based on unadjusted prices and tradability.
+- `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
 
 ## Quantitative Constraints That Must Not Be Violated
 
@@ -85,20 +85,23 @@ When AKShare provides a cache, the CSV and metadata must additionally record its
 
 A cache may be reused only when its schema and provider match the current implementation, its metadata covers the requested interval, its recorded observed date range exactly matches the valid dates in the CSV, its price type matches the request, its row count and SHA-256 digest match the CSV, and its non-empty CSV contains only valid trading dates. `observed_start` may be later than `requested_start` for a stock that was not yet listed; this is an audited availability boundary rather than fabricated missing data. Every CSV row must also match the security encoded by the filename and the requested price type. The CSV is replaced atomically before the metadata is committed, so an interrupted update leaves a detectable mismatch instead of a silently reusable mixed pair. Legacy or incomplete caches must be fetched again.
 
-## Current Data-Migration State
+## Current Frozen Data Snapshot
 
-The local ignored `data/market/raw/000300_ME_panel.csv` is a legacy constituent-filtered panel. It lacks complete prices before index inclusion and after index removal, and it does not contain a native eligibility column. For compatibility, the current code temporarily adds an eligibility column when reading this file and emits a warning, but it cannot recover prices that were already discarded.
+The corrected shared-data snapshot is `000300_ME_20210101_20260630_akshare_v1`. It retains the existing audited `000300_ME_membership.csv`, which contains 66 month-end snapshots, 19,800 membership rows, and 459 unique historical securities from 2021-01-29 through 2026-06-30. AKShare was used only to retrieve complete per-security prices for that historical symbol set; it was not used to infer or backfill historical membership.
 
-The audited local membership history contains 459 unique securities, while the legacy market panel contains 458. Security `688072` appears in the final membership snapshot but has no row in the local market panel. The local `portfolio_backtest_20d.csv` also predates the current report schema and lacks the `gross_portfolio_return` and `transaction_cost` columns.
+Both price conventions have 459 valid CSV/metadata pairs. The forward-adjusted research panel contains 593,334 rows, and the unadjusted execution panel contains 593,335 rows. Both panels cover all 459 historical securities, including `688072`, and retain prices outside membership periods. The research panel has 201,096 rows with `eligible_on_signal_date=False`; these rows remain available for factor lookback and post-removal portfolio valuation.
 
-AKShare can rebuild complete per-security prices without a Token, but its constituent interface provides only a current snapshot and cannot be used to reconstruct monthly historical membership. Corrected shared data and reports can be rebuilt only after audited historical membership is available, using this sequence:
+The membership history, per-security caches, and merged panels remain valid frozen inputs. A later audit found that the code used to build v1 advanced factor and return windows by per-security row position, which could bridge a missing security-level trading date. Current code uses exact positions in the global market calendar and leaves the result missing when the required security bar is absent. Therefore, v1's factor, evaluation, and backtest artifacts are historical outputs of commit `83a0547facb53c42be342fc402dc077868c49063`, not outputs of the current corrected calculation. Exact configuration, membership, cache-set, artifact, and archive identities are recorded in `snapshots/000300_ME_20210101_20260630_akshare_v1.toml`. The matching archive is `data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip`; Git LFS tracks this archive while expanded and generated `data/` contents remain ignored. After cloning, run `git lfs pull` and extract the archive into the project root. Never overwrite a frozen snapshot in place. Create a new snapshot identifier and manifest whenever source data, configuration, or calculation code changes.
+
+AKShare's constituent interface still provides only a current snapshot and cannot reconstruct monthly historical membership. Exact reproduction of all v1 artifacts requires the manifest's `project_commit`. With current code, starting from the audited membership file, use the following sequence and freeze the regenerated outputs under a new snapshot identifier after the code has been committed:
 
 ```powershell
 uv run python main.py --build-market-history
-uv run python main.py --run-market-history --with-evaluation --with-backtest
+uv run python main.py --build-execution-history
+uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest
 ```
 
-When using a provider that supports historical constituent snapshots, run `--build-universe-history` first. The market-history build command must be rerun until all per-security caches are complete. Existing reports use the legacy data convention and must not be represented as reflecting the corrected index-removal treatment.
+When using a provider that supports historical constituent snapshots, run `--build-universe-history` first. Each history-build command must be rerun until all per-security caches are complete before generating reports or creating a new frozen snapshot.
 
 ## Development Validation
 

@@ -19,7 +19,10 @@ def test_preprocessor_standardizes_each_date_and_preserves_missing_values(
     factor_panel: pd.DataFrame,
 ) -> None:
     processed = preprocess_factors(factor_panel, ["test_factor"])
-    first_day = processed.loc[processed["date"] == "2024-01-02", "test_factor"]
+    first_day = processed.loc[
+        processed["date"] == pd.Timestamp("2024-01-02"),
+        "test_factor",
+    ]
 
     assert first_day.mean() == pytest.approx(0.0)
     assert first_day.std(ddof=0) == pytest.approx(1.0)
@@ -41,3 +44,10 @@ def test_preprocessor_rejects_missing_identifier_columns(factor_panel: pd.DataFr
 def test_preprocessor_rejects_non_positive_mad_scale(factor_panel: pd.DataFrame) -> None:
     with pytest.raises(ValueError, match="有限正数"):
         preprocess_factors(factor_panel, ["test_factor"], mad_scale=-1)
+
+
+def test_preprocessor_rejects_duplicate_security_dates(factor_panel: pd.DataFrame) -> None:
+    duplicated = pd.concat([factor_panel, factor_panel.iloc[[0]]], ignore_index=True)
+
+    with pytest.raises(ValueError, match="重复记录"):
+        preprocess_factors(duplicated, ["test_factor"])

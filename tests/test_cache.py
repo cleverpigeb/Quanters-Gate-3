@@ -3,13 +3,14 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import quanters_gate.data.cache as cache_module
 from quanters_gate.data.cache import (
     cache_daily_bar_batch,
-    fetch_universe_daily_bars,
     load_cached_daily_bars,
 )
+from quanters_gate.data.provider import fetch_universe_daily_bars
 from quanters_gate.storage import calculate_sha256
 
 PRICE_TYPE = "lxr_fc_rights"
@@ -51,6 +52,29 @@ def test_fetch_universe_daily_bars_uses_injected_provider() -> None:
 
     assert provider.calls == 2
     assert bars["symbol"].tolist() == ["000001", "000001", "000002", "000002"]
+
+
+def test_fetch_universe_daily_bars_rejects_a_mismatched_response() -> None:
+    class WrongPriceClient(CacheClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            data = super().fetch_daily_bars(symbol, start_date, end_date, price_type)
+            data["price_type"] = "ex_rights"
+            return data
+
+    with pytest.raises(RuntimeError, match="响应与请求不一致"):
+        fetch_universe_daily_bars(
+            ["000001"],
+            "2024-01-01",
+            "2024-01-31",
+            WrongPriceClient(),
+            PRICE_TYPE,
+        )
 
 
 def test_cache_skips_histories_with_matching_coverage(tmp_path: Path) -> None:
@@ -154,10 +178,9 @@ def test_cache_records_and_validates_optional_data_source(tmp_path: Path) -> Non
 
 
 def test_akshare_refetches_legacy_cache_without_data_source(tmp_path: Path) -> None:
-    class LegacyAkShareClient(CacheClient):
+    class SourceAkShareClient(CacheClient):
         provider_name = "akshare"
 
-    class SourceAkShareClient(LegacyAkShareClient):
         def fetch_daily_bars(
             self,
             symbol: str,
@@ -169,7 +192,7 @@ def test_akshare_refetches_legacy_cache_without_data_source(tmp_path: Path) -> N
             data["data_source"] = "eastmoney"
             return data
 
-    legacy = LegacyAkShareClient()
+    legacy = CacheClient()
     cache_daily_bar_batch(
         ["000001"],
         "2024-01-01",
@@ -179,6 +202,10 @@ def test_akshare_refetches_legacy_cache_without_data_source(tmp_path: Path) -> N
         1,
         PRICE_TYPE,
     )
+    metadata_path = tmp_path / "000001.meta.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["provider"] = "akshare"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
     updated = SourceAkShareClient()
     progress = cache_daily_bar_batch(
         ["000001"],
@@ -192,6 +219,25 @@ def test_akshare_refetches_legacy_cache_without_data_source(tmp_path: Path) -> N
 
     assert progress["fetched"] == 1
     assert updated.calls == 1
+
+
+def test_akshare_rejects_new_cache_without_data_source(tmp_path: Path) -> None:
+    class IncompleteAkShareClient(CacheClient):
+        provider_name = "akshare"
+
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        IncompleteAkShareClient(),
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["failed"] == 1
+    assert not (tmp_path / "000001.csv").exists()
+    assert not (tmp_path / "000001.meta.json").exists()
 
 
 def test_cache_refetches_when_requested_start_expands(tmp_path: Path) -> None:
@@ -483,6 +529,36 @@ def test_cache_refetches_when_metadata_is_not_a_json_object(tmp_path: Path) -> N
     assert client.calls == 2
 
 
+def test_cache_refetches_when_build_timestamp_is_missing(tmp_path: Path) -> None:
+    client = CacheClient()
+    cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+    metadata_path = tmp_path / "000001.meta.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    del metadata["built_at"]
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        client,
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["fetched"] == 1
+    assert client.calls == 2
+
+
 def test_cache_rejects_a_frame_containing_any_invalid_date(tmp_path: Path) -> None:
     class InvalidDateProvider(CacheClient):
         def fetch_daily_bars(
@@ -514,3 +590,65 @@ def test_cache_rejects_a_frame_containing_any_invalid_date(tmp_path: Path) -> No
     assert progress["remaining"] == 1
     assert not (tmp_path / "000001.csv").exists()
     assert not (tmp_path / "000001.meta.json").exists()
+
+
+def test_cache_rejects_duplicate_trading_dates(tmp_path: Path) -> None:
+    class DuplicateDateProvider(CacheClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            return pd.DataFrame(
+                {
+                    "date": [start_date, start_date],
+                    "symbol": [symbol, symbol],
+                    "price_type": [price_type, price_type],
+                }
+            )
+
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        DuplicateDateProvider(),
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["failed"] == 1
+    assert not (tmp_path / "000001.csv").exists()
+
+
+def test_cache_rejects_dates_outside_the_requested_range(tmp_path: Path) -> None:
+    class OutOfRangeProvider(CacheClient):
+        def fetch_daily_bars(
+            self,
+            symbol: str,
+            start_date: str,
+            end_date: str,
+            price_type: str,
+        ) -> pd.DataFrame:
+            return pd.DataFrame(
+                {
+                    "date": ["2023-12-29", end_date],
+                    "symbol": [symbol, symbol],
+                    "price_type": [price_type, price_type],
+                }
+            )
+
+    progress = cache_daily_bar_batch(
+        ["000001"],
+        "2024-01-01",
+        "2024-01-31",
+        tmp_path,
+        OutOfRangeProvider(),
+        1,
+        PRICE_TYPE,
+    )
+
+    assert progress["failed"] == 1
+    assert not (tmp_path / "000001.csv").exists()

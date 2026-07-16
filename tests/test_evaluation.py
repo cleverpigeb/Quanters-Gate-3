@@ -42,6 +42,7 @@ def test_empty_rank_ic_has_stable_schema() -> None:
     panel = pd.DataFrame(
         {
             "date": ["2024-01-01"],
+            "symbol": ["000001"],
             "test_factor": [1.0],
             "forward_return_1d": [0.1],
         }
@@ -61,12 +62,12 @@ def test_quantile_returns_and_top_bottom_spread() -> None:
                     "date": date,
                     "symbol": f"00000{score}",
                     "test_factor": score,
-                    "forward_return_20d": score * 0.01,
+                    "forward_return_1d": score * 0.01,
                 }
             )
     panel = pd.DataFrame(rows)
 
-    returns = calculate_quantile_returns(panel, ["test_factor"], 20, 5, sample_step=1)
+    returns = calculate_quantile_returns(panel, ["test_factor"], 1, 5, sample_step=1)
     summary = summarize_quantile_returns(returns)
     spreads = summarize_top_bottom_spreads(summary, 5)
 
@@ -79,13 +80,14 @@ def test_quantile_evaluation_rejects_too_few_groups() -> None:
     panel = pd.DataFrame(
         {
             "date": ["2024-01-01"],
+            "symbol": ["000001"],
             "test_factor": [1.0],
-            "forward_return_20d": [0.1],
+            "forward_return_1d": [0.1],
         }
     )
 
     with pytest.raises(ValueError, match="至少"):
-        calculate_quantile_returns(panel, ["test_factor"], 20, 1, sample_step=1)
+        calculate_quantile_returns(panel, ["test_factor"], 1, 1, sample_step=1)
 
 
 def test_constant_rank_ic_has_undefined_ir_instead_of_infinity() -> None:
@@ -94,3 +96,24 @@ def test_constant_rank_ic_has_undefined_ir_instead_of_infinity() -> None:
     summary = summarize_rank_ic(rank_ic)
 
     assert pd.isna(summary.loc[0, "ic_ir"])
+
+
+def test_evaluation_rejects_overlapping_forward_windows() -> None:
+    panel = pd.DataFrame(
+        {
+            "date": ["2024-01-01"] * 3,
+            "test_factor": [1.0, 2.0, 3.0],
+            "forward_return_20d": [0.01, 0.02, 0.03],
+        }
+    )
+
+    with pytest.raises(ValueError, match="窗口会重叠"):
+        calculate_rank_ic(panel, ["test_factor"], horizon=20, sample_step=10)
+
+
+def test_evaluation_rejects_duplicate_security_dates(ic_panel: pd.DataFrame) -> None:
+    panel = add_forward_returns(ic_panel, horizon=1)
+    duplicated = pd.concat([panel, panel.iloc[[0]]], ignore_index=True)
+
+    with pytest.raises(ValueError, match="重复记录"):
+        calculate_rank_ic(duplicated, ["test_factor"], horizon=1, sample_step=1)

@@ -15,4 +15,8 @@ htmlcov/
 .env
 
 # 本地数据与运行产物
-/data/
+/data/*
+!/data/snapshots/
+/data/snapshots/*
+!/data/snapshots/*.zip
+!/data/snapshots/*.zip.sha256
