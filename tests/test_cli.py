@@ -1,6 +1,7 @@
 import pytest
 
 from quanters_gate.cli import build_parser, main, parse_args
+from quanters_gate.settings import PROJECT_CONFIG
 
 
 def test_primary_modes_are_mutually_exclusive(capsys: pytest.CaptureFixture[str]) -> None:
@@ -20,6 +21,17 @@ def test_help_and_defaults_are_chinese() -> None:
     assert "用法：" in help_text
     assert "选项：" in help_text
     assert "显示帮助信息并退出" in help_text
+
+
+def test_command_defaults_come_from_toml_config() -> None:
+    args = parse_args([])
+
+    assert args.symbols == list(PROJECT_CONFIG.universe.symbols)
+    assert args.start == PROJECT_CONFIG.research.start_date
+    assert args.end == PROJECT_CONFIG.research.end_date
+    assert args.horizon == PROJECT_CONFIG.research.forward_days
+    assert args.max_universe_snapshots == PROJECT_CONFIG.universe.snapshot_batch_size
+    assert args.max_market_symbols == PROJECT_CONFIG.universe.market_fetch_batch_size
 
 
 def test_main_rejects_reversed_date_range_in_chinese(

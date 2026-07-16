@@ -1,25 +1,32 @@
-"""编排数据构建与研究流水线。"""
+# 编排数据构建与研究流水线。
 
 from argparse import Namespace
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
 
-from quanters_gate.cache import (
+from quanters_gate.backtest.execution import add_next_open_execution_returns
+from quanters_gate.backtest.portfolio import run_monthly_top_n_backtest, summarize_backtest
+from quanters_gate.data.cache import (
     cache_daily_bar_batch,
     fetch_universe_daily_bars,
     load_cached_daily_bars,
 )
-from quanters_gate.cleaning import build_cleaning_summary, clean_daily_bars
-from quanters_gate.evaluation import (
-    calculate_quantile_returns,
-    calculate_rank_ic,
-    summarize_quantile_returns,
-    summarize_rank_ic,
-    summarize_top_bottom_spreads,
+from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
+from quanters_gate.data.dates import normalize_trade_dates
+from quanters_gate.data.provider import MarketDataProvider, MarketDataProviderFactory
+from quanters_gate.data.universe import (
+    ELIGIBILITY_COLUMN,
+    attach_membership_eligibility,
+    build_index_stock_pool,
+    build_index_stock_pool_history,
+    monthly_rebalance_dates,
+    normalize_symbols,
+    select_eligible_signals,
 )
-from quanters_gate.factors import calculate_price_factors
-from quanters_gate.lixinger import LixingerClient
 from quanters_gate.paths import (
     FACTOR_PROCESSED_DIR,
     FACTOR_RAW_DIR,
@@ -32,59 +39,119 @@ from quanters_gate.paths import (
     UNIVERSE_DIR,
     ensure_project_directories,
 )
-from quanters_gate.portfolio import run_monthly_top_n_backtest, summarize_backtest
-from quanters_gate.preprocessing import build_preprocess_summary, preprocess_factors
-from quanters_gate.returns import add_forward_returns, add_next_open_execution_returns
-from quanters_gate.settings import (
-    IC_SAMPLE_STEP,
-    INITIAL_UNIVERSE_INDEX,
-    LIXINGER_EXECUTION_PRICE_TYPE,
-    LIXINGER_RESEARCH_PRICE_TYPE,
-    PORTFOLIO_FACTOR_WEIGHTS,
-    PORTFOLIO_ONE_WAY_COST_RATE,
-    PORTFOLIO_TOP_N,
-    PRICE_FACTOR_COLUMNS,
-    QUANTILE_COUNT,
-    REBALANCE_FREQUENCY,
+from quanters_gate.research.evaluation import (
+    calculate_quantile_returns,
+    calculate_rank_ic,
+    summarize_quantile_returns,
+    summarize_rank_ic,
+    summarize_top_bottom_spreads,
 )
-from quanters_gate.universe import (
-    ELIGIBILITY_COLUMN,
-    attach_membership_eligibility,
-    build_index_stock_pool,
-    build_index_stock_pool_history,
-    monthly_rebalance_dates,
-    normalize_symbols,
-    select_eligible_signals,
-)
+from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
+from quanters_gate.research.preprocessing import build_preprocess_summary, preprocess_factors
+from quanters_gate.research.returns import add_forward_returns
+from quanters_gate.settings import PROJECT_CONFIG, RunConfig, serialize_run_config
+from quanters_gate.storage import atomic_write_csv, atomic_write_text
 from quanters_gate.validation import require_columns, require_positive, validate_date_range
 
 CSV_ENCODING = "utf-8-sig"
 
 
 def _membership_path() -> Path:
-    return UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_membership.csv"
+    universe = PROJECT_CONFIG.universe
+    return UNIVERSE_DIR / f"{universe.index_code}_{universe.rebalance_frequency}_membership.csv"
 
 
 def _history_panel_path(directory: Path) -> Path:
-    return directory / f"{INITIAL_UNIVERSE_INDEX}_{REBALANCE_FREQUENCY}_panel.csv"
+    universe = PROJECT_CONFIG.universe
+    return directory / f"{universe.index_code}_{universe.rebalance_frequency}_panel.csv"
 
 
 def _write_csv(data: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data.to_csv(path, index=False, encoding=CSV_ENCODING)
+    atomic_write_csv(data, path, encoding=CSV_ENCODING)
 
 
-def build_universe_history(args: Namespace) -> None:
-    """分批构建月末指数成分历史。"""
+def _normalized_research_dates(args: Namespace) -> tuple[str, str]:
+    start, end = validate_date_range(args.start, args.end)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def _resolve_run_config(args: Namespace) -> RunConfig:
+    start_date, end_date = _normalized_research_dates(args)
+    if args.run_market_history:
+        mode = "historical_market"
+    elif args.universe_date:
+        mode = "universe_snapshot"
+    else:
+        mode = "symbols"
+    return RunConfig(
+        schema_version=PROJECT_CONFIG.schema_version,
+        mode=mode,
+        universe_date=args.universe_date,
+        with_preprocess=any(
+            (
+                args.with_preprocess,
+                args.with_analysis,
+                args.with_evaluation,
+                args.with_backtest,
+                args.with_execution_backtest,
+            )
+        ),
+        with_analysis=args.with_analysis or args.with_evaluation,
+        with_evaluation=args.with_evaluation,
+        with_backtest=args.with_backtest,
+        with_execution_backtest=args.with_execution_backtest,
+        research=replace(
+            PROJECT_CONFIG.research,
+            start_date=start_date,
+            end_date=end_date,
+            forward_days=args.horizon,
+        ),
+        universe=replace(
+            PROJECT_CONFIG.universe,
+            symbols=tuple(normalize_symbols(args.symbols)),
+            snapshot_batch_size=args.max_universe_snapshots,
+            market_fetch_batch_size=args.max_market_symbols,
+        ),
+        data=PROJECT_CONFIG.data,
+        portfolio=PROJECT_CONFIG.portfolio,
+    )
+
+
+def _write_run_config(config: RunConfig) -> None:
+    atomic_write_text(serialize_run_config(config), REPORT_DIR / "run_config.toml")
+
+
+@contextmanager
+def _provider_session(
+    provider_factory: MarketDataProviderFactory,
+) -> Iterator[MarketDataProvider]:
+    provider = provider_factory()
+    try:
+        if provider.provider_name != PROJECT_CONFIG.data.provider:
+            raise ValueError(
+                f"配置的数据源 {PROJECT_CONFIG.data.provider} 与注入的数据源 "
+                f"{provider.provider_name} 不一致。"
+            )
+        yield provider
+    finally:
+        provider.close()
+
+
+def build_universe_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 分批构建月末指数成分历史。
     require_positive(args.max_universe_snapshots, "单批最大成分快照数")
-    with LixingerClient() as client:
-        index_bars = client.fetch_index_daily_bars(
-            INITIAL_UNIVERSE_INDEX,
+    universe = PROJECT_CONFIG.universe
+    with _provider_session(provider_factory) as provider:
+        index_bars = provider.fetch_index_daily_bars(
+            universe.index_code,
             args.start,
             args.end,
         )
         rebalancing_dates = monthly_rebalance_dates(index_bars["date"])
-        snapshot_dir = UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_monthly_snapshots"
+        snapshot_dir = UNIVERSE_DIR / f"{universe.index_code}_monthly_snapshots"
         snapshot_dir.mkdir(parents=True, exist_ok=True)
 
         snapshots: dict[pd.Timestamp, pd.DataFrame] = {}
@@ -106,8 +173,8 @@ def build_universe_history(args: Namespace) -> None:
                 missing_dates.append(date)
 
         for date in missing_dates[: args.max_universe_snapshots]:
-            snapshot = client.fetch_index_constituents(
-                INITIAL_UNIVERSE_INDEX,
+            snapshot = provider.fetch_index_constituents(
+                universe.index_code,
                 date.strftime("%Y-%m-%d"),
             )
             if snapshot.empty:
@@ -121,7 +188,7 @@ def build_universe_history(args: Namespace) -> None:
         )
         return
 
-    membership = build_index_stock_pool_history(snapshots, INITIAL_UNIVERSE_INDEX)
+    membership = build_index_stock_pool_history(snapshots, universe.index_code)
     _write_csv(membership, _membership_path())
     print(f"已构建 {len(rebalancing_dates)} 个月度快照，共 {len(membership)} 条成分记录。")
 
@@ -132,6 +199,7 @@ def _build_market_history(
     panel_dir: Path,
     price_type: str,
     label: str,
+    provider_factory: MarketDataProviderFactory,
 ) -> None:
     membership_path = _membership_path()
     if not membership_path.exists():
@@ -141,13 +209,13 @@ def _build_market_history(
     membership = pd.read_csv(membership_path, dtype={"symbol": "string"})
     require_columns(membership, ("as_of_date", "symbol"), "成分历史")
     symbols = normalize_symbols(sorted(membership["symbol"].dropna().unique().tolist()))
-    with LixingerClient() as client:
+    with _provider_session(provider_factory) as provider:
         progress = cache_daily_bar_batch(
             symbols,
             args.start,
             args.end,
             cache_dir,
-            client,
+            provider,
             args.max_market_symbols,
             price_type,
         )
@@ -164,25 +232,33 @@ def _build_market_history(
     print(f"已构建{label}：完整行情 {len(panel)} 行，其中信号日可选记录 {eligible_rows} 行。")
 
 
-def build_research_market_history(args: Namespace) -> None:
-    """构建复权研究行情的完整历史面板。"""
+def build_research_market_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 构建复权研究行情的完整历史面板。
     _build_market_history(
         args,
         MARKET_RAW_BY_SYMBOL_DIR,
         MARKET_RAW_DIR,
-        LIXINGER_RESEARCH_PRICE_TYPE,
+        PROJECT_CONFIG.data.research_price_type,
         "研究行情",
+        provider_factory,
     )
 
 
-def build_execution_market_history(args: Namespace) -> None:
-    """构建未复权执行行情的完整历史面板。"""
+def build_execution_market_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 构建未复权执行行情的完整历史面板。
     _build_market_history(
         args,
         MARKET_EXECUTION_BY_SYMBOL_DIR,
         MARKET_EXECUTION_DIR,
-        LIXINGER_EXECUTION_PRICE_TYPE,
+        PROJECT_CONFIG.data.execution_price_type,
         "执行行情",
+        provider_factory,
     )
 
 
@@ -205,39 +281,45 @@ def _load_historical_panel() -> pd.DataFrame:
     return attach_membership_eligibility(panel, membership)
 
 
-def _load_pipeline_input(args: Namespace) -> pd.DataFrame:
+def _load_pipeline_input(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> pd.DataFrame:
     if args.run_market_history:
         return _load_historical_panel()
 
     if args.universe_date:
-        with LixingerClient() as client:
-            constituents = client.fetch_index_constituents(
-                INITIAL_UNIVERSE_INDEX,
+        universe = PROJECT_CONFIG.universe
+        with _provider_session(provider_factory) as provider:
+            constituents = provider.fetch_index_constituents(
+                universe.index_code,
                 args.universe_date,
             )
             stock_pool = build_index_stock_pool(
                 constituents,
-                INITIAL_UNIVERSE_INDEX,
+                universe.index_code,
                 args.universe_date,
             )
             _write_csv(
                 stock_pool,
-                UNIVERSE_DIR / f"{INITIAL_UNIVERSE_INDEX}_{args.universe_date}.csv",
+                UNIVERSE_DIR / f"{universe.index_code}_{args.universe_date}.csv",
             )
             return fetch_universe_daily_bars(
                 stock_pool["symbol"].tolist(),
                 args.start,
                 args.end,
-                client=client,
+                provider=provider,
+                price_type=PROJECT_CONFIG.data.research_price_type,
             )
 
     symbols = normalize_symbols(args.symbols)
-    with LixingerClient() as client:
+    with _provider_session(provider_factory) as provider:
         return fetch_universe_daily_bars(
             symbols,
             args.start,
             args.end,
-            client=client,
+            provider=provider,
+            price_type=PROJECT_CONFIG.data.research_price_type,
         )
 
 
@@ -253,15 +335,29 @@ def _advanced_research_requested(args: Namespace) -> bool:
     )
 
 
+def _filter_signal_date_range(data: pd.DataFrame, args: Namespace) -> pd.DataFrame:
+    # 仅限制信号日期，因子回看和未来收益仍使用完整行情历史。
+    require_columns(data, ("date",), "信号数据")
+    start_date, end_date = _normalized_research_dates(args)
+    result = data.copy()
+    result["date"] = normalize_trade_dates(result["date"])
+    if result["date"].isna().any():
+        raise ValueError("信号数据包含无效交易日期。")
+    start = pd.Timestamp(start_date)
+    end = pd.Timestamp(end_date)
+    return result.loc[result["date"].between(start, end)].copy()
+
+
 def _run_portfolio_backtest(
     factor_data: pd.DataFrame,
     args: Namespace,
 ) -> pd.DataFrame:
+    portfolio = PROJECT_CONFIG.portfolio
     backtest = run_monthly_top_n_backtest(
         factor_data,
-        PORTFOLIO_FACTOR_WEIGHTS,
+        portfolio.factor_weights,
         args.horizon,
-        PORTFOLIO_TOP_N,
+        portfolio.top_n,
     )
     _write_csv(backtest, REPORT_DIR / f"portfolio_backtest_{args.horizon}d.csv")
     summary = summarize_backtest(backtest)
@@ -273,6 +369,7 @@ def _run_execution_backtest(
     factor_data: pd.DataFrame,
     args: Namespace,
 ) -> pd.DataFrame:
+    portfolio = PROJECT_CONFIG.portfolio
     execution_path = _history_panel_path(MARKET_EXECUTION_DIR)
     if not execution_path.exists():
         raise FileNotFoundError("请先构建未复权执行行情面板。")
@@ -290,11 +387,11 @@ def _run_execution_backtest(
     )
     backtest = run_monthly_top_n_backtest(
         execution_panel,
-        PORTFOLIO_FACTOR_WEIGHTS,
+        portfolio.factor_weights,
         args.horizon,
-        PORTFOLIO_TOP_N,
+        portfolio.top_n,
         return_column="execution_return",
-        one_way_cost_rate=PORTFOLIO_ONE_WAY_COST_RATE,
+        one_way_cost_rate=portfolio.one_way_cost_rate,
     )
     _write_csv(backtest, REPORT_DIR / f"execution_backtest_{args.horizon}d.csv")
     summary = summarize_backtest(backtest)
@@ -302,9 +399,13 @@ def _run_execution_backtest(
     return summary
 
 
-def run_research_pipeline(args: Namespace) -> None:
-    """运行行情清洗、因子、评估和组合研究。"""
-    raw_data = _load_pipeline_input(args)
+def run_research_pipeline(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 运行行情清洗、因子、评估和组合研究。
+    run_config = _resolve_run_config(args)
+    raw_data = _load_pipeline_input(args, provider_factory)
     _write_csv(raw_data, MARKET_RAW_DIR / "daily_bars.csv")
 
     clean_data = clean_daily_bars(raw_data)
@@ -319,11 +420,13 @@ def run_research_pipeline(args: Namespace) -> None:
     factor_data = calculate_price_factors(clean_data)
     _write_csv(factor_data, FACTOR_RAW_DIR / "price_factors.csv")
     if not _advanced_research_requested(args):
+        _write_run_config(run_config)
         print("基础流水线已完成。使用 --with-preprocess 或 --with-analysis 生成研究输出。")
         return
 
     factors = list(PRICE_FACTOR_COLUMNS)
     factor_data = add_forward_returns(factor_data, args.horizon)
+    factor_data = _filter_signal_date_range(factor_data, args)
     factor_data = select_eligible_signals(factor_data)
     if factor_data.empty:
         raise ValueError("当前日期范围内没有具备信号日资格的记录。")
@@ -343,7 +446,12 @@ def run_research_pipeline(args: Namespace) -> None:
 
     rank_ic_summary: pd.DataFrame | None = None
     if args.with_analysis or args.with_evaluation:
-        rank_ic = calculate_rank_ic(factor_data, factors, args.horizon, IC_SAMPLE_STEP)
+        rank_ic = calculate_rank_ic(
+            factor_data,
+            factors,
+            args.horizon,
+            PROJECT_CONFIG.research.ic_sample_step,
+        )
         rank_ic_summary = summarize_rank_ic(rank_ic)
         _write_csv(rank_ic, REPORT_DIR / f"rank_ic_timeseries_{args.horizon}d.csv")
         _write_csv(rank_ic_summary, REPORT_DIR / f"rank_ic_summary_{args.horizon}d.csv")
@@ -353,8 +461,8 @@ def run_research_pipeline(args: Namespace) -> None:
             factor_data,
             factors,
             args.horizon,
-            QUANTILE_COUNT,
-            IC_SAMPLE_STEP,
+            PROJECT_CONFIG.research.quantile_count,
+            PROJECT_CONFIG.research.ic_sample_step,
         )
         quantile_summary = summarize_quantile_returns(quantile_returns)
         _write_csv(
@@ -366,10 +474,14 @@ def run_research_pipeline(args: Namespace) -> None:
             REPORT_DIR / f"quantile_return_summary_{args.horizon}d.csv",
         )
         _write_csv(
-            summarize_top_bottom_spreads(quantile_summary, QUANTILE_COUNT),
+            summarize_top_bottom_spreads(
+                quantile_summary,
+                PROJECT_CONFIG.research.quantile_count,
+            ),
             REPORT_DIR / f"quantile_spread_summary_{args.horizon}d.csv",
         )
 
+    _write_run_config(run_config)
     if portfolio_summary is not None:
         print("组合研究回测已完成：")
         print(portfolio_summary.to_string(index=False))
@@ -383,18 +495,21 @@ def run_research_pipeline(args: Namespace) -> None:
         print("因子预处理已完成。")
 
 
-def execute(args: Namespace) -> None:
-    """根据命令行参数选择唯一的主工作流。"""
+def execute(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 根据命令行参数选择唯一的主工作流。
     validate_date_range(args.start, args.end)
     require_positive(args.horizon, "未来收益周期")
     ensure_project_directories()
     if args.build_universe_history:
-        build_universe_history(args)
+        build_universe_history(args, provider_factory)
         return
     if args.build_market_history:
-        build_research_market_history(args)
+        build_research_market_history(args, provider_factory)
         return
     if args.build_execution_history:
-        build_execution_market_history(args)
+        build_execution_market_history(args, provider_factory)
         return
-    run_research_pipeline(args)
+    run_research_pipeline(args, provider_factory)

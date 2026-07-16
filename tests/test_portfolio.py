@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.portfolio import run_monthly_top_n_backtest, summarize_backtest
+from quanters_gate.backtest.portfolio import run_monthly_top_n_backtest, summarize_backtest
 
 
 @pytest.fixture

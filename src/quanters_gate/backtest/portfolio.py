@@ -1,11 +1,11 @@
-"""执行月度 Top N 组合研究回测及其摘要计算。"""
+# 执行月度 Top N 组合研究回测及其摘要计算。
 
 from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
 
-from quanters_gate.universe import select_eligible_signals
+from quanters_gate.data.universe import select_eligible_signals
 from quanters_gate.validation import (
     require_columns,
     require_non_negative_finite,
@@ -78,7 +78,7 @@ def run_monthly_top_n_backtest(
     return_column: str | None = None,
     one_way_cost_rate: float = 0.0,
 ) -> pd.DataFrame:
-    """使用未来收益运行月度等权 Top N 组合研究回测。"""
+    # 使用未来收益运行月度等权 Top N 组合研究回测。
     target, weights = _validate_backtest_input(
         data,
         factor_weights,
@@ -140,7 +140,7 @@ def run_monthly_top_n_backtest(
 
 
 def summarize_backtest(backtest: pd.DataFrame, periods_per_year: int = 12) -> pd.DataFrame:
-    """汇总组合与等权股票池基准的收益和风险。"""
+    # 汇总组合与等权股票池基准的收益和风险。
     columns = [
         "observation_count",
         "portfolio_total_return",

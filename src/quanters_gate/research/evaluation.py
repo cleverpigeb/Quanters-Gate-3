@@ -1,11 +1,11 @@
-"""评估因子的 Rank IC 和分组收益。"""
+# 评估因子的 Rank IC 和分组收益。
 
 from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
 
-from quanters_gate.universe import select_eligible_signals
+from quanters_gate.data.universe import select_eligible_signals
 from quanters_gate.validation import require_columns, require_positive
 
 RANK_IC_COLUMNS = ["date", "factor", "rank_ic"]
@@ -44,7 +44,7 @@ def calculate_rank_ic(
     horizon: int,
     sample_step: int,
 ) -> pd.DataFrame:
-    """计算非重叠横截面的 Spearman Rank IC。"""
+    # 计算非重叠横截面的 Spearman Rank IC。
     factors, target = _validate_evaluation_input(data, factor_columns, horizon)
     eligible = select_eligible_signals(data)
     date_groups = _sampled_date_groups(eligible, sample_step)
@@ -62,7 +62,7 @@ def calculate_rank_ic(
 
 
 def summarize_rank_ic(rank_ic: pd.DataFrame) -> pd.DataFrame:
-    """汇总每个因子的 IC 均值、稳定性和正值比例。"""
+    # 汇总每个因子的 IC 均值、稳定性和正值比例。
     columns = ["factor", "mean_rank_ic", "rank_ic_std", "count", "ic_ir", "positive_rate"]
     if rank_ic.empty:
         return pd.DataFrame(columns=columns)
@@ -84,7 +84,7 @@ def calculate_quantile_returns(
     quantile_count: int,
     sample_step: int,
 ) -> pd.DataFrame:
-    """在非重叠日期上计算等权因子分组收益。"""
+    # 在非重叠日期上计算等权因子分组收益。
     factors, target = _validate_evaluation_input(data, factor_columns, horizon)
     if quantile_count < 2:
         raise ValueError("分组数量至少为 2。")
@@ -111,7 +111,7 @@ def calculate_quantile_returns(
 
 
 def summarize_quantile_returns(quantile_returns: pd.DataFrame) -> pd.DataFrame:
-    """汇总每个因子分组的平均未来收益。"""
+    # 汇总每个因子分组的平均未来收益。
     columns = ["factor", "quantile", "mean_forward_return", "observation_count"]
     if quantile_returns.empty:
         return pd.DataFrame(columns=columns)
@@ -131,7 +131,7 @@ def summarize_top_bottom_spreads(
     quantile_summary: pd.DataFrame,
     quantile_count: int,
 ) -> pd.DataFrame:
-    """汇总最高组与最低组的收益差。"""
+    # 汇总最高组与最低组的收益差。
     if quantile_count < 2:
         raise ValueError("分组数量至少为 2。")
     columns = ["factor", "low_quantile_return", "high_quantile_return", "top_bottom_spread"]

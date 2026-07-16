@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.returns import add_next_open_execution_returns
+from quanters_gate.backtest.execution import add_next_open_execution_returns
 
 
 def test_execution_return_uses_next_open_and_requires_tradable_exit() -> None:

@@ -1,4 +1,4 @@
-"""计算价格与成交额因子。"""
+# 计算价格与成交额因子。
 
 import numpy as np
 import pandas as pd
@@ -6,10 +6,16 @@ import pandas as pd
 from quanters_gate.validation import require_columns
 
 REQUIRED_COLUMNS = ("date", "symbol", "close", "amount")
+PRICE_FACTOR_COLUMNS = (
+    "momentum_20d",
+    "reversal_5d",
+    "volatility_20d",
+    "turnover_proxy_20d",
+)
 
 
 def calculate_price_factors(data: pd.DataFrame) -> pd.DataFrame:
-    """从清洗后的复权日线计算首批价格量因子。"""
+    # 从清洗后的复权日线计算首批价格量因子。
     require_columns(data, REQUIRED_COLUMNS, "因子输入")
 
     factors = data.copy().sort_values(["symbol", "date"]).reset_index(drop=True)

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.factors import calculate_price_factors
+from quanters_gate.research.factors import calculate_price_factors
 
 
 @pytest.fixture

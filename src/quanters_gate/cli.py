@@ -1,22 +1,16 @@
-"""定义项目命令行入口。"""
+# 定义项目命令行入口。
 
 import argparse
 import sys
 from collections.abc import Sequence
 
-from quanters_gate.settings import (
-    DEFAULT_END_DATE,
-    DEFAULT_START_DATE,
-    DEFAULT_UNIVERSE,
-    FORWARD_DAYS,
-    MARKET_FETCH_BATCH_SIZE,
-    UNIVERSE_SNAPSHOT_BATCH_SIZE,
-)
+from quanters_gate.data.lixinger import LixingerClient
+from quanters_gate.settings import PROJECT_CONFIG
 from quanters_gate.workflows import execute
 
 
 class ChineseArgumentParser(argparse.ArgumentParser):
-    """提供中文帮助标题和统一的中文参数错误。"""
+    # 提供中文帮助标题和统一的中文参数错误。
 
     def format_usage(self) -> str:
         return super().format_usage().replace("usage:", "用法：", 1)
@@ -30,22 +24,24 @@ class ChineseArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """创建带互斥主模式校验的命令行解析器。"""
+    # 创建带互斥主模式校验的命令行解析器。
+    research = PROJECT_CONFIG.research
+    universe = PROJECT_CONFIG.universe
     parser = ChineseArgumentParser(description="运行 A 股多因子研究流水线。", add_help=False)
     parser.add_argument("-h", "--help", action="help", help="显示帮助信息并退出。")
     parser.add_argument(
-        "--symbols", nargs="+", default=list(DEFAULT_UNIVERSE), help="临时股票代码列表。"
+        "--symbols", nargs="+", default=list(universe.symbols), help="临时股票代码列表。"
     )
 
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
         "--universe-date",
-        help="使用指定日期的沪深 300 成分快照代替 --symbols。",
+        help=f"使用指定日期的{universe.index_name} 成分快照代替 --symbols。",
     )
     modes.add_argument(
         "--build-universe-history",
         action="store_true",
-        help="分批构建月末沪深 300 成分历史后退出。",
+        help=f"分批构建月末{universe.index_name} 成分历史后退出。",
     )
     modes.add_argument(
         "--build-market-history",
@@ -60,24 +56,24 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument(
         "--run-market-history",
         action="store_true",
-        help="使用已构建的沪深 300 历史行情面板运行研究。",
+        help=f"使用已构建的{universe.index_name} 历史行情面板运行研究。",
     )
 
     parser.add_argument(
         "--max-universe-snapshots",
         type=int,
-        default=UNIVERSE_SNAPSHOT_BATCH_SIZE,
+        default=universe.snapshot_batch_size,
         help="单次最多获取的缺失月度成分快照数。",
     )
     parser.add_argument(
         "--max-market-symbols",
         type=int,
-        default=MARKET_FETCH_BATCH_SIZE,
+        default=universe.market_fetch_batch_size,
         help="单次最多获取的缺失股票行情数。",
     )
-    parser.add_argument("--start", default=DEFAULT_START_DATE, help="研究开始日期。")
-    parser.add_argument("--end", default=DEFAULT_END_DATE, help="研究结束日期。")
-    parser.add_argument("--horizon", type=int, default=FORWARD_DAYS, help="未来收益周期。")
+    parser.add_argument("--start", default=research.start_date, help="研究开始日期。")
+    parser.add_argument("--end", default=research.end_date, help="研究结束日期。")
+    parser.add_argument("--horizon", type=int, default=research.forward_days, help="未来收益周期。")
     parser.add_argument("--with-preprocess", action="store_true", help="执行因子预处理。")
     parser.add_argument("--with-analysis", action="store_true", help="执行 Rank IC 分析。")
     parser.add_argument("--with-evaluation", action="store_true", help="执行因子分组收益评估。")
@@ -95,14 +91,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """解析命令行参数。"""
+    # 解析命令行参数。
     return build_parser().parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
-    """运行命令行入口。"""
+    # 运行命令行入口。
     try:
-        execute(parse_args(argv))
+        execute(parse_args(argv), LixingerClient)
     except (FileNotFoundError, RuntimeError, ValueError) as error:
         print(f"错误：{error}", file=sys.stderr)
         raise SystemExit(1) from None

@@ -1,4 +1,4 @@
-"""Quanters' Gate 3 的项目入口。"""
+# Quanters' Gate 3 的项目入口。
 
 from quanters_gate.cli import main
 

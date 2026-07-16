@@ -18,27 +18,35 @@ Quanters' Gate 3 是面向 A 股个股的多因子研究项目。项目以沪深
 ```text
 quanters_gate_3/
 ├─ main.py                         # 唯一项目入口
+├─ config/
+│  └─ default.toml                 # 版本化的研究与回测默认配置
 ├─ pyproject.toml                  # 项目、依赖、pytest 与 Ruff 配置
 ├─ uv.lock                         # uv 锁定的完整依赖版本
 ├─ src/quanters_gate/
 │  ├─ cli.py                       # 中文命令行界面与互斥模式校验
 │  ├─ workflows.py                 # 数据构建和研究流程编排
-│  ├─ settings.py                  # 研究参数和外部接口常量
+│  ├─ settings.py                  # TOML 配置读取和严格校验
 │  ├─ paths.py                     # 项目数据路径的唯一来源
-│  ├─ dates.py                     # 上海交易日期标准化
 │  ├─ validation.py                # 共用输入校验
-│  ├─ lixinger.py                  # 理杏仁 HTTP 客户端
-│  ├─ cache.py                     # 可续跑的逐股票缓存
-│  ├─ cleaning.py                  # 日线清洗和审计摘要
-│  ├─ universe.py                  # 历史成员资格与股票代码
-│  ├─ factors.py                   # 原始价格量因子
-│  ├─ preprocessing.py             # MAD 去极值和横截面标准化
-│  ├─ returns.py                   # 研究收益与执行收益
-│  ├─ evaluation.py                # Rank IC 和因子分组收益
-│  └─ portfolio.py                 # 月度 Top N 组合回测
+│  ├─ storage.py                   # 原子文件写入与内容校验
+│  ├─ data/                        # 行情来源、缓存、清洗与股票池
+│  │  ├─ provider.py               # 行情数据源协议与工厂类型
+│  │  ├─ lixinger.py               # 理杏仁 HTTP 客户端
+│  │  ├─ cache.py                  # 可续跑的逐股票缓存
+│  │  ├─ cleaning.py               # 日线清洗和审计摘要
+│  │  ├─ dates.py                  # 上海交易日期标准化
+│  │  └─ universe.py               # 历史成员资格与股票代码
+│  ├─ research/                    # 因子计算、研究收益与统计评估
+│  │  ├─ factors.py                # 原始价格量因子
+│  │  ├─ preprocessing.py          # MAD 去极值和横截面标准化
+│  │  ├─ returns.py                # 研究口径未来收益
+│  │  └─ evaluation.py             # Rank IC 和因子分组收益
+│  └─ backtest/                    # 组合构建与执行收益
+│     ├─ portfolio.py              # 月度 Top N 组合回测
+│     └─ execution.py              # 次日开盘执行收益
 ├─ tests/                          # pytest 单元测试和回归测试
 ├─ data/                           # 本地输入、中间结果和报告
-└─ agent.MD                        # 交接给其他 AI 代理的开发文档
+└─ AGENTS.md                       # 交接给其他 AI 代理的开发文档
 ```
 
 ## 环境
@@ -59,11 +67,29 @@ uv run pytest
 
 ## 修改项目
 
-- 修改研究日期、预测周期、组合持仓数、成本率或默认因子权重时，编辑 `src/quanters_gate/settings.py`。
-- 新增或调整原始因子时，编辑 `src/quanters_gate/factors.py`，并同步检查 `PRICE_FACTOR_COLUMNS`、组合权重和对应测试。
+- 修改研究日期、预测周期、股票池、基准指数、调仓频率、评估参数、组合持仓数、成本率、随机种子或默认因子权重时，编辑 `config/default.toml`。
+- 新增或调整原始因子时，编辑 `src/quanters_gate/research/factors.py`，并同步检查 `PRICE_FACTOR_COLUMNS`、组合权重和对应测试。
 - 修改数据获取、缓存、清洗、收益或回测规则时，编辑职责对应的模块，不要把业务逻辑放入根目录 `main.py`。
+- 新增数据源时，实现 `src/quanters_gate/data/provider.py` 中的协议，并只在应用入口选择具体实现；缓存和研究流程不得依赖供应商专用鉴权或 HTTP 细节。
 - 修改命令行参数时，编辑 `src/quanters_gate/cli.py`；跨模块执行顺序由 `src/quanters_gate/workflows.py` 管理。
 - 每次修改后运行 Ruff 和 pytest；涉及量化计算时，还要检查样本数量、缺失值、日期对齐和是否引入未来信息。
+
+## 项目配置
+
+`config/default.toml` 是版本控制内唯一的研究默认配置，并通过 `schema_version` 明确配置格式版本。程序启动时只读该文件并进行校验，不会重写或格式化它；修改后的值会在下一次运行中实际生效。它记录以下内容：
+
+- `research`：研究区间、未来收益周期、IC 抽样步长、分组数和随机种子。
+- `universe`：默认股票列表、基准指数、调仓频率和下载批量。
+- `data`：数据来源、研究价格口径和执行价格口径。
+- `portfolio`：持仓数量、单边成本率和因子权重。
+
+命令行中的 `--symbols`、`--start`、`--end`、`--horizon` 和两个批量参数仍可临时覆盖对应默认值。每次研究流程成功完成后，程序会将实际生效的参数、运行模式和功能开关原子写入 `data/reports/run_config.toml`，因此命令行覆盖值也能随结果保存。当前流程没有随机步骤，但配置仍显式保存随机种子，防止未来加入随机算法后失去复现依据。
+
+理杏仁 Token 不属于研究配置，禁止写入 `config/default.toml`，仍只能通过环境变量或未跟踪的 `.env` 文件提供。
+
+## 数据源边界
+
+`data/provider.py` 定义行情下载所需的结构化协议。`LixingerClient` 是当前唯一实现，由 `cli.py` 在应用启动时注入；缓存和研究流程只接收协议或数据源工厂。这样可以在测试中使用内存数据源，也可以在未来增加离线数据集或备用供应商，而不需要修改因子、收益和回测逻辑。
 
 ## 数据结构
 
@@ -82,7 +108,7 @@ eligible_on_signal_date
 000001.meta.json
 ```
 
-元数据记录实际请求的开始日期、结束日期和价格口径，防止把区间不足的旧缓存误判为完整数据。
+元数据记录缓存格式版本、数据来源、实际请求区间、价格口径、行数、CSV 内容的 SHA-256 摘要和构建时间。CSV 与元数据都通过同目录临时文件原子替换，并最后提交元数据；因此，即使写入中断，也能通过行数或内容摘要不一致识别失效缓存，避免误用新旧文件混合的数据。
 
 ## 常用命令
 
@@ -146,13 +172,13 @@ uv run python main.py --symbols 000001 000002 000063 000333 600000
 LIXINGER_TOKEN=你的真实令牌
 ```
 
-## 当前共享数据说明
+## 当前本地数据说明
 
-仓库中现有的 `data/market/raw/000300_ME_panel.csv` 来自旧版流程：它在保存前已经按成分资格删除了非成员价格，因此无法恢复股票退出指数后的行情。新代码会在读取它时发出中文警告并保持旧数据可运行，但这不能修复已经丢失的数据。
+本地 `data/market/raw/000300_ME_panel.csv` 来自旧版流程；`data/` 已被 Git 忽略，不属于当前仓库版本。该面板在保存前已经按成分资格删除了非成员价格，因此无法恢复股票退出指数后的行情。新代码会在读取它时发出中文警告并保持旧数据可运行，但这不能修复已经丢失的数据。
 
-本次审计还确认：成分历史在最后一个快照中包含 `688072`，但旧行情面板没有该股票的价格，因此当前共享面板覆盖 458 只股票，而成分历史覆盖 459 只。仓库中跟踪的 `portfolio_backtest_20d.csv` 也早于当前报告结构，尚不包含 `gross_portfolio_return` 和 `transaction_cost` 两列。
+本次审计还确认：本地成分历史在最后一个快照中包含 `688072`，但旧行情面板没有该股票的价格，因此本地面板覆盖 458 只股票，而成分历史覆盖 459 只。本地 `portfolio_backtest_20d.csv` 也早于当前报告结构，尚不包含 `gross_portfolio_return` 和 `transaction_cost` 两列。
 
-要得到修正后的研究结果，必须准备理杏仁 Token，重复执行 `--build-market-history` 直至完整缓存构建完成，再重新生成研究报告。仓库中现有报告应视为旧数据口径的历史快照。
+要得到修正后的研究结果，必须准备理杏仁 Token，重复执行 `--build-market-history` 直至完整缓存构建完成，再重新生成研究报告。本地现有报告应视为旧数据口径的历史快照。
 
 ## 当前研究边界
 

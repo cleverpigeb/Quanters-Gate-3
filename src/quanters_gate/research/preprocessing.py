@@ -1,4 +1,4 @@
-"""执行横截面因子预处理和覆盖率审计。"""
+# 执行横截面因子预处理和覆盖率审计。
 
 from collections.abc import Sequence
 
@@ -22,7 +22,7 @@ def _validate_factor_panel(data: pd.DataFrame, factor_columns: Sequence[str]) ->
 
 
 def winsorize_mad(series: pd.Series, mad_scale: float = 3.0) -> pd.Series:
-    """使用中位数绝对偏差缩尾，同时保留缺失值。"""
+    # 使用中位数绝对偏差缩尾，同时保留缺失值。
     require_positive_finite(mad_scale, "MAD 缩尾倍数")
     numeric = pd.to_numeric(series, errors="coerce")
     valid = numeric.dropna()
@@ -38,7 +38,7 @@ def winsorize_mad(series: pd.Series, mad_scale: float = 3.0) -> pd.Series:
 
 
 def zscore(series: pd.Series) -> pd.Series:
-    """使用总体标准差计算 z-score，并稳定处理常数截面。"""
+    # 使用总体标准差计算 z-score，并稳定处理常数截面。
     numeric = pd.to_numeric(series, errors="coerce")
     std = numeric.std(ddof=0)
     if pd.isna(std) or std == 0:
@@ -51,7 +51,7 @@ def preprocess_factors(
     factor_columns: Sequence[str],
     mad_scale: float = 3.0,
 ) -> pd.DataFrame:
-    """按交易日批量执行 MAD 去极值和 z-score 标准化。"""
+    # 按交易日批量执行 MAD 去极值和 z-score 标准化。
     require_positive_finite(mad_scale, "MAD 缩尾倍数")
     columns = _validate_factor_panel(data, factor_columns)
     result = data.copy().sort_values(list(REQUIRED_ID_COLUMNS)).reset_index(drop=True)
@@ -84,7 +84,7 @@ def build_preprocess_summary(
     data: pd.DataFrame,
     factor_columns: Sequence[str],
 ) -> pd.DataFrame:
-    """汇总各因子的缺失率和横截面覆盖情况。"""
+    # 汇总各因子的缺失率和横截面覆盖情况。
     columns = _validate_factor_panel(data, factor_columns)
     rows: list[dict[str, object]] = []
     for column in columns:

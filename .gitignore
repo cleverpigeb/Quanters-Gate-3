@@ -15,4 +15,4 @@ htmlcov/
 .env
 
 # 本地数据与运行产物
-data/
+/data/

@@ -1,9 +1,9 @@
-"""清洗并审计日线行情。"""
+# 清洗并审计日线行情。
 
 import numpy as np
 import pandas as pd
 
-from quanters_gate.dates import normalize_trade_dates
+from quanters_gate.data.dates import normalize_trade_dates
 from quanters_gate.validation import require_columns
 
 REQUIRED_COLUMNS = ("date", "symbol", "open", "high", "low", "close", "volume", "amount")
@@ -12,7 +12,7 @@ NUMERIC_COLUMNS = (*PRICE_COLUMNS, "volume", "amount", "turnover")
 
 
 def clean_daily_bars(data: pd.DataFrame) -> pd.DataFrame:
-    """清洗日线，同时保留停牌事实和额外的业务字段。"""
+    # 清洗日线，同时保留停牌事实和额外的业务字段。
     require_columns(data, REQUIRED_COLUMNS, "日线数据")
 
     cleaned = data.copy()
@@ -41,7 +41,7 @@ def clean_daily_bars(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_cleaning_summary(raw_data: pd.DataFrame, cleaned_data: pd.DataFrame) -> pd.DataFrame:
-    """生成一行清洗审计摘要。"""
+    # 生成一行清洗审计摘要。
     return pd.DataFrame(
         [
             {

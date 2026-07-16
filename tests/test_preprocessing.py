@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.preprocessing import build_preprocess_summary, preprocess_factors
+from quanters_gate.research.preprocessing import build_preprocess_summary, preprocess_factors
 
 
 @pytest.fixture

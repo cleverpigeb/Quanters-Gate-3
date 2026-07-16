@@ -1,14 +1,14 @@
 import pandas as pd
 import pytest
 
-from quanters_gate.evaluation import (
+from quanters_gate.research.evaluation import (
     calculate_quantile_returns,
     calculate_rank_ic,
     summarize_quantile_returns,
     summarize_rank_ic,
     summarize_top_bottom_spreads,
 )
-from quanters_gate.returns import add_forward_returns
+from quanters_gate.research.returns import add_forward_returns
 
 
 @pytest.fixture

@@ -1,4 +1,4 @@
-"""Quanters' Gate 3 量化研究包。"""
+# Quanters' Gate 3 量化研究包。
 
 __all__ = ["__version__"]
 

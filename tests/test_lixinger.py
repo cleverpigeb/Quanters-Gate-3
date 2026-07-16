@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from quanters_gate.lixinger import LixingerClient
+from quanters_gate.data.lixinger import LixingerClient
 
 
 class FakeResponse:
@@ -116,4 +116,4 @@ def test_company_bars_reject_invalid_provider_dates() -> None:
     client = LixingerClient(token="test-token", session=InvalidDateSession())
 
     with pytest.raises(ValueError, match="无效交易日期"):
-        client.fetch_daily_bars("000001", "2024-01-01", "2024-01-31")
+        client.fetch_daily_bars("000001", "2024-01-01", "2024-01-31", "lxr_fc_rights")
