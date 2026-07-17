@@ -44,8 +44,11 @@ from quanters_gate.paths import (
     ensure_project_directories,
 )
 from quanters_gate.research.evaluation import (
+    build_factor_diagnostic_summary,
+    calculate_factor_rank_correlations,
     calculate_quantile_returns,
     calculate_rank_ic,
+    summarize_factor_rank_correlations,
     summarize_quantile_returns,
     summarize_rank_ic,
     summarize_top_bottom_spreads,
@@ -498,6 +501,23 @@ def run_research_pipeline(
                 PROJECT_CONFIG.research.quantile_count,
             ),
             REPORT_DIR / f"quantile_spread_summary_{args.horizon}d.csv",
+        )
+        _write_csv(
+            build_factor_diagnostic_summary(
+                rank_ic,
+                quantile_summary,
+                PROJECT_CONFIG.research.quantile_count,
+            ),
+            REPORT_DIR / f"factor_diagnostic_summary_{args.horizon}d.csv",
+        )
+        factor_correlations = calculate_factor_rank_correlations(
+            factor_data,
+            factors,
+            args.horizon,
+        )
+        _write_csv(
+            summarize_factor_rank_correlations(factor_correlations),
+            REPORT_DIR / f"factor_rank_correlation_summary_{args.horizon}d.csv",
         )
 
     _write_run_config(run_config)

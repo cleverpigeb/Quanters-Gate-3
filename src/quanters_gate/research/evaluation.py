@@ -1,6 +1,7 @@
 # 评估因子的 Rank IC 和分组收益。
 
 from collections.abc import Sequence
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
@@ -16,6 +17,7 @@ from quanters_gate.validation import (
 
 RANK_IC_COLUMNS = ["date", "factor", "rank_ic"]
 QUANTILE_RETURN_COLUMNS = ["date", "factor", "quantile", "forward_return"]
+FACTOR_RANK_CORRELATION_COLUMNS = ["date", "factor_left", "factor_right", "rank_correlation"]
 
 
 def _prepare_evaluation_input(
@@ -85,6 +87,59 @@ def summarize_rank_ic(rank_ic: pd.DataFrame) -> pd.DataFrame:
     )
     summary["positive_rate"] = positive_rate
     return summary.rename(columns={"mean": "mean_rank_ic", "std": "rank_ic_std"}).reset_index()
+
+
+def calculate_factor_rank_correlations(
+    data: pd.DataFrame,
+    factor_columns: Sequence[str],
+    horizon: int,
+) -> pd.DataFrame:
+    # 计算每个信号日横截面内不同因子的 Spearman 相关性。
+    eligible, factors, _ = _prepare_evaluation_input(data, factor_columns, horizon)
+    records: list[dict[str, object]] = []
+    for date, group in eligible.groupby("date", sort=True):
+        for factor_left, factor_right in combinations(factors, 2):
+            pair = group[[factor_left, factor_right]].dropna()
+            if len(pair) < 3 or pair[factor_left].nunique() < 2 or pair[factor_right].nunique() < 2:
+                continue
+            correlation = pair.corr(method="spearman").iloc[0, 1]
+            if pd.notna(correlation):
+                records.append(
+                    {
+                        "date": date,
+                        "factor_left": factor_left,
+                        "factor_right": factor_right,
+                        "rank_correlation": correlation,
+                    }
+                )
+    return pd.DataFrame(records, columns=FACTOR_RANK_CORRELATION_COLUMNS)
+
+
+def summarize_factor_rank_correlations(correlations: pd.DataFrame) -> pd.DataFrame:
+    # 汇总因子之间的日度横截面相关性，用于识别重复暴露。
+    columns = [
+        "factor_left",
+        "factor_right",
+        "mean_rank_correlation",
+        "rank_correlation_std",
+        "observation_count",
+    ]
+    if correlations.empty:
+        return pd.DataFrame(columns=columns)
+    require_columns(
+        correlations,
+        ("factor_left", "factor_right", "rank_correlation"),
+        "因子相关性数据",
+    )
+    return (
+        correlations.groupby(["factor_left", "factor_right"], sort=True)["rank_correlation"]
+        .agg(
+            mean_rank_correlation="mean",
+            rank_correlation_std="std",
+            observation_count="count",
+        )
+        .reset_index()
+    )
 
 
 def calculate_quantile_returns(
@@ -166,3 +221,49 @@ def summarize_top_bottom_spreads(
     )
     result["top_bottom_spread"] = result["high_quantile_return"] - result["low_quantile_return"]
     return result.reset_index()
+
+
+def build_factor_diagnostic_summary(
+    rank_ic: pd.DataFrame,
+    quantile_summary: pd.DataFrame,
+    quantile_count: int,
+) -> pd.DataFrame:
+    # 合并 IC、显著性和分组单调性，供研究阶段人工筛选因子。
+    columns = [
+        "factor",
+        "mean_rank_ic",
+        "rank_ic_std",
+        "ic_count",
+        "ic_ir",
+        "rank_ic_t_stat",
+        "positive_rate",
+        "low_quantile_return",
+        "high_quantile_return",
+        "top_bottom_spread",
+        "quantile_monotonicity",
+    ]
+    rank_summary = summarize_rank_ic(rank_ic).rename(columns={"count": "ic_count"})
+    if rank_summary.empty:
+        return pd.DataFrame(columns=columns)
+
+    rank_summary["rank_ic_t_stat"] = (
+        rank_summary["mean_rank_ic"]
+        / (rank_summary["rank_ic_std"] / np.sqrt(rank_summary["ic_count"]))
+    ).replace([np.inf, -np.inf], np.nan)
+
+    spreads = summarize_top_bottom_spreads(quantile_summary, quantile_count)
+    monotonicity_rows: list[dict[str, object]] = []
+    for factor, group in quantile_summary.groupby("factor", sort=True):
+        usable = group[["quantile", "mean_forward_return"]].dropna()
+        correlation = np.nan
+        if len(usable) >= 3 and usable["quantile"].nunique() >= 3:
+            correlation = usable.corr(method="spearman").iloc[0, 1]
+        monotonicity_rows.append({"factor": factor, "quantile_monotonicity": correlation})
+    monotonicity = pd.DataFrame(monotonicity_rows, columns=["factor", "quantile_monotonicity"])
+
+    result = rank_summary.merge(spreads, on="factor", how="left").merge(
+        monotonicity,
+        on="factor",
+        how="left",
+    )
+    return result.reindex(columns=columns).sort_values("factor").reset_index(drop=True)

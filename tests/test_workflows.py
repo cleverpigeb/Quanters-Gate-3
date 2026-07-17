@@ -103,6 +103,7 @@ def test_historical_pipeline_filters_signals_after_full_history_calculation(
             "close": close,
             "volume": [1000] * len(dates),
             "amount": [10000] * len(dates),
+            "turnover": [0.01] * len(dates),
         }
     )
     args = Namespace(

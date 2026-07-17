@@ -2,8 +2,11 @@ import pandas as pd
 import pytest
 
 from quanters_gate.research.evaluation import (
+    build_factor_diagnostic_summary,
+    calculate_factor_rank_correlations,
     calculate_quantile_returns,
     calculate_rank_ic,
+    summarize_factor_rank_correlations,
     summarize_quantile_returns,
     summarize_rank_ic,
     summarize_top_bottom_spreads,
@@ -117,3 +120,66 @@ def test_evaluation_rejects_duplicate_security_dates(ic_panel: pd.DataFrame) -> 
 
     with pytest.raises(ValueError, match="重复记录"):
         calculate_rank_ic(duplicated, ["test_factor"], horizon=1, sample_step=1)
+
+
+def test_factor_diagnostic_summary_combines_ic_and_quantile_evidence() -> None:
+    rank_ic = pd.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-02"],
+            "factor": ["test_factor", "test_factor"],
+            "rank_ic": [0.2, 0.4],
+        }
+    )
+    quantile_summary = pd.DataFrame(
+        {
+            "factor": ["test_factor"] * 5,
+            "quantile": [1, 2, 3, 4, 5],
+            "mean_forward_return": [0.01, 0.02, 0.03, 0.04, 0.05],
+            "observation_count": [2] * 5,
+        }
+    )
+
+    result = build_factor_diagnostic_summary(rank_ic, quantile_summary, quantile_count=5)
+
+    assert result.loc[0, "ic_count"] == 2
+    assert result.loc[0, "rank_ic_t_stat"] == pytest.approx(3.0)
+    assert result.loc[0, "top_bottom_spread"] == pytest.approx(0.04)
+    assert result.loc[0, "quantile_monotonicity"] == pytest.approx(1.0)
+
+
+def test_factor_rank_correlations_respect_signal_eligibility() -> None:
+    rows = []
+    for date in ("2024-01-01", "2024-01-02"):
+        for value in range(1, 5):
+            rows.append(
+                {
+                    "date": date,
+                    "symbol": f"00000{value}",
+                    "factor_up": value,
+                    "factor_down": 5 - value,
+                    "forward_return_1d": value * 0.01,
+                    "eligible_on_signal_date": True,
+                }
+            )
+    rows.append(
+        {
+            "date": "2024-01-01",
+            "symbol": "000099",
+            "factor_up": 99,
+            "factor_down": 99,
+            "forward_return_1d": 0.99,
+            "eligible_on_signal_date": False,
+        }
+    )
+
+    correlations = calculate_factor_rank_correlations(
+        pd.DataFrame(rows),
+        ["factor_up", "factor_down"],
+        horizon=1,
+    )
+    summary = summarize_factor_rank_correlations(correlations)
+
+    assert len(correlations) == 2
+    assert (correlations["rank_correlation"] == -1.0).all()
+    assert summary.loc[0, "mean_rank_correlation"] == pytest.approx(-1.0)
+    assert summary.loc[0, "observation_count"] == 2

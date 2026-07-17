@@ -25,10 +25,10 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `data/cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
 - `data/dates.py`: Shanghai trading-date normalization and global-calendar position mapping.
 - `data/universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
-- `research/factors.py`: Calendar-aligned 20-day momentum, 5-day reversal, 20-day volatility, and turnover proxy.
+- `research/factors.py`: Calendar-aligned 20/60-day momentum, 5-day reversal, 20-day volatility, turnover proxy, Amihud illiquidity, turnover surprise, and maximum daily return.
 - `research/preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
 - `research/returns.py`: Calendar-aligned forward close-to-close research returns.
-- `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, and Top-Bottom spreads.
+- `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, Top-Bottom spreads, factor diagnostic summaries, and pairwise factor rank correlations.
 - `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
 - `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
 
@@ -58,7 +58,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `data/cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
 - Low-level `data` modules must receive price conventions explicitly and must not import `PROJECT_CONFIG`.
 - Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
-- Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`.
+- Generated report fields and paths are auditable interfaces. Intentional changes require corresponding updates to tests and `README.md`. Factor diagnostics are research evidence only and must not silently invert factor directions or alter portfolio weights.
 
 ## Configuration Contract
 
