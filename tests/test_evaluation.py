@@ -9,6 +9,7 @@ from quanters_gate.research.evaluation import (
     summarize_factor_rank_correlations,
     summarize_quantile_returns,
     summarize_rank_ic,
+    summarize_rank_ic_by_year,
     summarize_top_bottom_spreads,
 )
 from quanters_gate.research.returns import add_forward_returns
@@ -99,6 +100,22 @@ def test_constant_rank_ic_has_undefined_ir_instead_of_infinity() -> None:
     summary = summarize_rank_ic(rank_ic)
 
     assert pd.isna(summary.loc[0, "ic_ir"])
+
+
+def test_rank_ic_yearly_summary_keeps_year_boundaries() -> None:
+    rank_ic = pd.DataFrame(
+        {
+            "date": ["2023-01-03", "2023-02-03", "2024-01-03", "2024-02-03"],
+            "factor": ["test"] * 4,
+            "rank_ic": [0.1, 0.3, -0.2, -0.4],
+        }
+    )
+
+    summary = summarize_rank_ic_by_year(rank_ic)
+
+    assert summary["year"].tolist() == [2023, 2024]
+    assert summary["mean_rank_ic"].tolist() == pytest.approx([0.2, -0.3])
+    assert summary["positive_rate"].tolist() == [1.0, 0.0]
 
 
 def test_evaluation_rejects_overlapping_forward_windows() -> None:

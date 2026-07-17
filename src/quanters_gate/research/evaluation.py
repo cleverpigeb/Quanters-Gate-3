@@ -89,6 +89,37 @@ def summarize_rank_ic(rank_ic: pd.DataFrame) -> pd.DataFrame:
     return summary.rename(columns={"mean": "mean_rank_ic", "std": "rank_ic_std"}).reset_index()
 
 
+def summarize_rank_ic_by_year(rank_ic: pd.DataFrame) -> pd.DataFrame:
+    # 按自然年汇总非重叠 Rank IC，检查因子是否依赖单一年度。
+    columns = [
+        "factor",
+        "year",
+        "mean_rank_ic",
+        "rank_ic_std",
+        "count",
+        "rank_ic_t_stat",
+        "positive_rate",
+    ]
+    if rank_ic.empty:
+        return pd.DataFrame(columns=columns)
+    require_columns(rank_ic, ("date", "factor", "rank_ic"), "Rank IC 数据")
+    prepared = rank_ic.copy()
+    prepared["date"] = normalize_required_trade_dates(prepared["date"], "Rank IC 数据")
+    prepared["year"] = prepared["date"].dt.year
+    summary = prepared.groupby(["factor", "year"], sort=True)["rank_ic"].agg(
+        ["mean", "std", "count"]
+    )
+    summary["rank_ic_t_stat"] = (
+        summary["mean"] / (summary["std"] / np.sqrt(summary["count"]))
+    ).replace([np.inf, -np.inf], np.nan)
+    summary["positive_rate"] = (
+        prepared.assign(positive=prepared["rank_ic"] > 0)
+        .groupby(["factor", "year"])["positive"]
+        .mean()
+    )
+    return summary.rename(columns={"mean": "mean_rank_ic", "std": "rank_ic_std"}).reset_index()
+
+
 def calculate_factor_rank_correlations(
     data: pd.DataFrame,
     factor_columns: Sequence[str],

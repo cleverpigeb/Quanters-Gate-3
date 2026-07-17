@@ -29,7 +29,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `research/factors.py`: Calendar-aligned 20/60-day momentum, 5-day reversal, 20-day volatility, turnover proxy, Amihud illiquidity, turnover surprise, and maximum daily return.
 - `research/preprocessing.py`: Daily cross-sectional MAD winsorization and z-score standardization.
 - `research/returns.py`: Calendar-aligned forward close-to-close research returns.
-- `research/evaluation.py`: Non-overlapping Rank IC, quantile returns, Top-Bottom spreads, factor diagnostic summaries, and pairwise factor rank correlations.
+- `research/evaluation.py`: Non-overlapping Rank IC, yearly stability summaries, quantile returns, Top-Bottom spreads, factor diagnostic summaries, and pairwise factor rank correlations.
 - `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
 - `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
 

@@ -59,6 +59,7 @@ from quanters_gate.research.evaluation import (
     summarize_factor_rank_correlations,
     summarize_quantile_returns,
     summarize_rank_ic,
+    summarize_rank_ic_by_year,
     summarize_top_bottom_spreads,
 )
 from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS, calculate_price_factors
@@ -531,6 +532,10 @@ def run_research_pipeline(
         rank_ic_summary = summarize_rank_ic(rank_ic)
         _write_csv(rank_ic, REPORT_DIR / f"rank_ic_timeseries_{args.horizon}d.csv")
         _write_csv(rank_ic_summary, REPORT_DIR / f"rank_ic_summary_{args.horizon}d.csv")
+        _write_csv(
+            summarize_rank_ic_by_year(rank_ic),
+            REPORT_DIR / f"rank_ic_yearly_summary_{args.horizon}d.csv",
+        )
 
     if args.with_evaluation:
         quantile_returns = calculate_quantile_returns(
