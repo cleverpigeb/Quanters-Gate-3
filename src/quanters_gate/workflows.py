@@ -16,6 +16,12 @@ from quanters_gate.data.cache import (
 )
 from quanters_gate.data.cleaning import build_cleaning_summary, clean_daily_bars
 from quanters_gate.data.dates import normalize_required_trade_dates
+from quanters_gate.data.fundamentals import (
+    FINANCIAL_FACTOR_COLUMNS,
+    attach_fundamentals_asof,
+    cache_fundamental_batch,
+    load_cached_fundamentals,
+)
 from quanters_gate.data.provider import (
     MarketDataProvider,
     MarketDataProviderFactory,
@@ -34,6 +40,8 @@ from quanters_gate.data.universe import (
 from quanters_gate.paths import (
     FACTOR_PROCESSED_DIR,
     FACTOR_RAW_DIR,
+    FUNDAMENTALS_PROCESSED_DIR,
+    FUNDAMENTALS_RAW_DIR,
     MARKET_EXECUTION_BY_SYMBOL_DIR,
     MARKET_EXECUTION_DIR,
     MARKET_PROCESSED_DIR,
@@ -285,6 +293,47 @@ def build_execution_market_history(
     )
 
 
+def build_fundamental_history(
+    args: Namespace,
+    provider_factory: MarketDataProviderFactory,
+) -> None:
+    # 分批构建历史成分股的财务 point-in-time 输入面板。
+    membership_path = _membership_path()
+    if not membership_path.exists():
+        raise FileNotFoundError("请先构建月度指数成分历史。")
+    require_positive(args.max_fundamental_symbols, "单批最大财务股票数")
+    membership = normalize_membership_history(
+        pd.read_csv(membership_path, dtype={"index_code": "string", "symbol": "string"})
+    )
+    symbols = normalize_symbols(sorted(membership["symbol"].dropna().unique().tolist()))
+    with _provider_session(provider_factory) as provider:
+        if not hasattr(provider, "fetch_financial_abstract") or not hasattr(
+            provider, "fetch_financial_statement_updates"
+        ):
+            raise ValueError("当前数据源不支持财务摘要和报表更新时间。")
+        completed, failures = cache_fundamental_batch(
+            symbols,
+            provider,
+            FUNDAMENTALS_RAW_DIR / "by_symbol",
+            args.max_fundamental_symbols,
+        )
+        panel = load_cached_fundamentals(
+            symbols,
+            provider.provider_name,
+            FUNDAMENTALS_RAW_DIR / "by_symbol",
+        )
+    cached_symbols = panel["symbol"].nunique()
+    if cached_symbols < len(symbols):
+        print(
+            f"本次新缓存 {completed} 只、失败 {failures} 只；当前完成 {cached_symbols}/{len(symbols)} 只财务股票，请再次运行继续。"
+        )
+        return
+    _write_csv(panel, FUNDAMENTALS_PROCESSED_DIR / "fundamental_panel.csv")
+    print(
+        f"已构建财务 point-in-time 面板：{len(panel)} 条报告期记录，覆盖 {cached_symbols} 只股票。"
+    )
+
+
 def _load_historical_panel() -> pd.DataFrame:
     path = _history_panel_path(MARKET_RAW_DIR)
     if not path.exists():
@@ -440,13 +489,18 @@ def run_research_pipeline(
     )
 
     factor_data = calculate_price_factors(clean_data)
+    fundamental_path = FUNDAMENTALS_PROCESSED_DIR / "fundamental_panel.csv"
+    factors = list(PRICE_FACTOR_COLUMNS)
+    if args.run_market_history and fundamental_path.exists():
+        fundamentals = pd.read_csv(fundamental_path, dtype={"symbol": "string"})
+        factor_data = attach_fundamentals_asof(factor_data, fundamentals)
+        factors.extend(FINANCIAL_FACTOR_COLUMNS)
     _write_csv(factor_data, FACTOR_RAW_DIR / "price_factors.csv")
     if not run_config.with_preprocess:
         _write_run_config(run_config)
         print("基础流水线已完成。使用 --with-preprocess 或 --with-analysis 生成研究输出。")
         return
 
-    factors = list(PRICE_FACTOR_COLUMNS)
     factor_data = add_forward_returns(factor_data, args.horizon)
     factor_data = _filter_signal_date_range(factor_data, args)
     factor_data = select_eligible_signals(factor_data)
@@ -543,6 +597,7 @@ def execute(
     require_positive(args.horizon, "未来收益周期")
     require_positive(args.max_universe_snapshots, "单批最大成分快照数")
     require_positive(args.max_market_symbols, "单批最大行情股票数")
+    require_positive(args.max_fundamental_symbols, "单批最大财务股票数")
     if args.with_analysis or args.with_evaluation:
         validate_non_overlapping_sample(
             args.horizon,
@@ -557,5 +612,8 @@ def execute(
         return
     if args.build_execution_history:
         build_execution_market_history(args, provider_factory)
+        return
+    if args.build_fundamental_history:
+        build_fundamental_history(args, provider_factory)
         return
     run_research_pipeline(args, provider_factory)

@@ -61,6 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="分批构建完整未复权执行行情后退出。",
     )
     modes.add_argument(
+        "--build-fundamental-history",
+        action="store_true",
+        help="分批构建历史成分股的财务 point-in-time 面板后退出。",
+    )
+    modes.add_argument(
         "--run-market-history",
         action="store_true",
         help=f"使用已构建的{universe.index_name} 历史行情面板运行研究。",
@@ -77,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=universe.market_fetch_batch_size,
         help="单次最多获取的缺失股票行情数。",
+    )
+    parser.add_argument(
+        "--max-fundamental-symbols",
+        type=int,
+        default=universe.market_fetch_batch_size,
+        help="单次最多获取的缺失财务股票数。",
     )
     parser.add_argument("--start", default=research.start_date, help="研究开始日期。")
     parser.add_argument("--end", default=research.end_date, help="研究结束日期。")

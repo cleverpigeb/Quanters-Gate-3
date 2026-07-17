@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from types import MappingProxyType
 
+from quanters_gate.data.fundamentals import FINANCIAL_FACTOR_COLUMNS
 from quanters_gate.paths import PROJECT_ROOT
 from quanters_gate.research.factors import PRICE_FACTOR_COLUMNS
 from quanters_gate.validation import validate_non_overlapping_sample
@@ -281,7 +282,9 @@ def _load_portfolio_config(data: Mapping[str, object]) -> PortfolioConfig:
     factor_weights = {factor: float(weight) for factor, weight in factor_table.items()}
     if any(not math.isfinite(weight) for weight in factor_weights.values()):
         raise ValueError("配置项 portfolio.factor_weights 必须包含有限数值。")
-    unknown_factors = set(factor_weights).difference(PRICE_FACTOR_COLUMNS)
+    unknown_factors = set(factor_weights).difference(
+        (*PRICE_FACTOR_COLUMNS, *FINANCIAL_FACTOR_COLUMNS)
+    )
     if unknown_factors:
         names = "、".join(sorted(unknown_factors))
         raise ValueError(f"配置包含尚未实现的组合因子：{names}")

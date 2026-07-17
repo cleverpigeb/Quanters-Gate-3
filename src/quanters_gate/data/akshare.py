@@ -29,6 +29,10 @@ class AkShareApi(Protocol):
 
     def index_stock_cons_csindex(self, **kwargs: object) -> pd.DataFrame: ...
 
+    def stock_financial_abstract(self, **kwargs: object) -> pd.DataFrame: ...
+
+    def stock_financial_report_sina(self, **kwargs: object) -> pd.DataFrame: ...
+
 
 def _load_akshare() -> AkShareApi:
     try:
@@ -95,6 +99,56 @@ class AkShareClient(MarketDataProvider):
     def close(self) -> None:
         # AKShare 的函数式接口不持有需要关闭的网络会话。
         return None
+
+    def fetch_financial_abstract(self, symbol: str) -> pd.DataFrame:
+        # 获取标准化财务指标宽表，保留原始中文指标以便后续审计。
+        try:
+            data = self._api.stock_financial_abstract(symbol=symbol)
+        except Exception as error:
+            raise RuntimeError(f"AKShare 获取股票 {symbol} 财务摘要失败：{error}") from None
+        if data.empty:
+            raise ValueError(f"股票 {symbol} 没有返回 AKShare 财务摘要。")
+        return data.copy()
+
+    def fetch_financial_statement_updates(self, symbol: str) -> pd.DataFrame:
+        # 三张表的最晚更新时间作为保守可用日，避免财务数据在披露日当日进入信号。
+        statements = ("利润表", "资产负债表", "现金流量表")
+        frames: list[pd.DataFrame] = []
+        for statement in statements:
+            try:
+                data = self._api.stock_financial_report_sina(
+                    stock=_sina_symbol(symbol),
+                    symbol=statement,
+                )
+            except Exception as error:
+                raise RuntimeError(
+                    f"AKShare 获取股票 {symbol} 的{statement}失败：{error}"
+                ) from None
+            renamed = data.rename(
+                columns={"报告日": "report_period", "更新日期": "available_date"}
+            ).copy()
+            require_columns(
+                renamed, ("report_period", "available_date"), f"股票 {symbol} 的{statement}"
+            )
+            frames.append(renamed[["report_period", "available_date"]])
+
+        updates = pd.concat(frames, ignore_index=True)
+        updates["report_period"] = pd.to_datetime(
+            updates["report_period"].astype("string"),
+            format="%Y%m%d",
+            errors="coerce",
+        )
+        updates["available_date"] = pd.to_datetime(
+            updates["available_date"], errors="coerce"
+        ).dt.normalize()
+        updates = updates.dropna(subset=["report_period", "available_date"])
+        if updates.empty:
+            raise ValueError(f"股票 {symbol} 的财务报表没有有效更新时间。")
+        return (
+            updates.groupby("report_period", as_index=False, sort=True)["available_date"]
+            .max()
+            .assign(symbol=symbol, source="sina_financial_reports")
+        )
 
     def _fetch_eastmoney_daily_bars(
         self,

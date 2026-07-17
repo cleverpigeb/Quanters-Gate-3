@@ -232,6 +232,7 @@ def test_execute_rejects_overlapping_cli_horizon_before_running_pipeline() -> No
         horizon=PROJECT_CONFIG.research.ic_sample_step + 1,
         max_universe_snapshots=1,
         max_market_symbols=1,
+        max_fundamental_symbols=1,
         with_preprocess=False,
         with_analysis=True,
         with_evaluation=False,

@@ -13,7 +13,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 ## Module Responsibilities
 
 - `cli.py`: Chinese-language CLI, argument defaults, primary-mode validation, and concrete provider selection.
-- `workflows.py`: Application orchestration for constituent history, market data, research, and backtests.
+- `workflows.py`: Application orchestration for constituent history, market data, fundamental history, research, and backtests.
 - `settings.py`: Typed loading and strict validation of the versioned TOML configuration.
 - `paths.py`: All project data paths.
 - `validation.py`: Shared input validation across subpackages.
@@ -23,6 +23,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `data/lixinger.py`: Authentication, HTTP sessions, API response validation, and source-field conversion.
 - `data/cache.py`: Per-security caches with auditable metadata and content-identity checks.
 - `data/cleaning.py`: Validation of daily fields, numeric values, OHLC relationships, duplicate rows, and tradability.
+- `data/fundamentals.py`: Financial-summary normalization and point-in-time attachment after a conservative disclosure-date lag.
 - `data/dates.py`: Shanghai trading-date normalization and global-calendar position mapping.
 - `data/universe.py`: Security-code normalization, constituent history, and `eligible_on_signal_date`.
 - `research/factors.py`: Calendar-aligned 20/60-day momentum, 5-day reversal, 20-day volatility, turnover proxy, Amihud illiquidity, turnover surprise, and maximum daily return.
@@ -92,6 +93,8 @@ The corrected shared-data snapshot is `000300_ME_20210101_20260630_akshare_v1`. 
 Both price conventions have 459 valid CSV/metadata pairs. The forward-adjusted research panel contains 593,334 rows, and the unadjusted execution panel contains 593,335 rows. Both panels cover all 459 historical securities, including `688072`, and retain prices outside membership periods. The research panel has 201,096 rows with `eligible_on_signal_date=False`; these rows remain available for factor lookback and post-removal portfolio valuation.
 
 The membership history, per-security caches, and merged panels remain valid frozen inputs. A later audit found that the code used to build v1 advanced factor and return windows by per-security row position, which could bridge a missing security-level trading date. Current code uses exact positions in the global market calendar and leaves the result missing when the required security bar is absent. Therefore, v1's factor, evaluation, and backtest artifacts are historical outputs of commit `83a0547facb53c42be342fc402dc077868c49063`, not outputs of the current corrected calculation. Exact configuration, membership, cache-set, artifact, and archive identities are recorded in `snapshots/000300_ME_20210101_20260630_akshare_v1.toml`. The matching archive is `data/snapshots/000300_ME_20210101_20260630_akshare_v1.zip`; Git LFS tracks this archive while expanded and generated `data/` contents remain ignored. After cloning, run `git lfs pull` and extract the archive into the project's `data/` directory because the archive root directly contains `market/`, `universe/`, `factors/`, and `reports/`. Never overwrite a frozen snapshot in place. Create a new snapshot identifier and manifest whenever source data, configuration, or calculation code changes.
+
+Financial history is not part of the frozen v1 snapshot. `--build-fundamental-history` fetches AKShare financial abstracts and three statement update dates sequentially into `data/fundamentals/raw/by_symbol/`, with a SHA-256 metadata file per security. It must be rerun until all historical universe symbols are cached. The processed panel uses the latest report whose conservative availability date is strictly before a signal date; it must never treat a report-period end date or same-day disclosure as tradable information. Only after a complete processed panel exists may historical research attach the four financial candidates.
 
 AKShare's constituent interface still provides only a current snapshot and cannot reconstruct monthly historical membership. Exact reproduction of all v1 artifacts requires the manifest's `project_commit`. With current code, starting from the audited membership file, use the following sequence and freeze the regenerated outputs under a new snapshot identifier after the code has been committed:
 
