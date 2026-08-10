@@ -105,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="执行次日开盘且扣除成本的执行口径回测。",
     )
+    parser.add_argument(
+        "--with-continuous-backtest",
+        action="store_true",
+        help="执行下一交易日开盘调仓的连续净值研究回测。",
+    )
     return parser
 
 

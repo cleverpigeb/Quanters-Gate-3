@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from quanters_gate.backtest.continuous import (
+    run_continuous_top_n_backtest,
+    summarize_continuous_backtest,
+)
 from quanters_gate.backtest.execution import add_next_open_execution_returns
 from quanters_gate.backtest.portfolio import run_monthly_top_n_backtest, summarize_backtest
 from quanters_gate.data.cache import (
@@ -120,12 +124,14 @@ def _resolve_run_config(args: Namespace, resolved_symbols: list[str]) -> RunConf
                 args.with_evaluation,
                 args.with_backtest,
                 args.with_execution_backtest,
+                args.with_continuous_backtest,
             )
         ),
         with_analysis=args.with_analysis or args.with_evaluation,
         with_evaluation=args.with_evaluation,
         with_backtest=args.with_backtest,
         with_execution_backtest=args.with_execution_backtest,
+        with_continuous_backtest=args.with_continuous_backtest,
         research=replace(
             PROJECT_CONFIG.research,
             start_date=start_date,
@@ -471,6 +477,26 @@ def _run_execution_backtest(
     return summary
 
 
+def _run_continuous_backtest(
+    factor_data: pd.DataFrame,
+    market_bars: pd.DataFrame,
+) -> pd.DataFrame:
+    portfolio = PROJECT_CONFIG.portfolio
+    result = run_continuous_top_n_backtest(
+        factor_data,
+        market_bars,
+        portfolio.factor_weights,
+        portfolio.top_n,
+        portfolio.one_way_cost_rate,
+    )
+    _write_csv(result.daily, REPORT_DIR / "continuous_backtest.csv")
+    _write_csv(result.trades, REPORT_DIR / "continuous_backtest_trades.csv")
+    _write_csv(result.holdings, REPORT_DIR / "continuous_backtest_holdings.csv")
+    summary = summarize_continuous_backtest(result.daily)
+    _write_csv(summary, REPORT_DIR / "continuous_backtest_summary.csv")
+    return summary
+
+
 def run_research_pipeline(
     args: Namespace,
     provider_factory: MarketDataProviderFactory,
@@ -516,10 +542,13 @@ def run_research_pipeline(
 
     portfolio_summary: pd.DataFrame | None = None
     execution_summary: pd.DataFrame | None = None
+    continuous_summary: pd.DataFrame | None = None
     if args.with_backtest:
         portfolio_summary = _run_portfolio_backtest(factor_data, args)
     if args.with_execution_backtest:
         execution_summary = _run_execution_backtest(factor_data, args)
+    if args.with_continuous_backtest:
+        continuous_summary = _run_continuous_backtest(factor_data, clean_data)
 
     rank_ic_summary: pd.DataFrame | None = None
     if args.with_analysis or args.with_evaluation:
@@ -586,10 +615,13 @@ def run_research_pipeline(
     if execution_summary is not None:
         print("执行口径回测已完成：")
         print(execution_summary.to_string(index=False))
+    if continuous_summary is not None:
+        print("连续净值研究回测已完成：")
+        print(continuous_summary.to_string(index=False))
     if rank_ic_summary is not None:
         print("因子研究分析已完成：")
         print(rank_ic_summary.to_string(index=False))
-    elif portfolio_summary is None and execution_summary is None:
+    elif portfolio_summary is None and execution_summary is None and continuous_summary is None:
         print("因子预处理已完成。")
 
 

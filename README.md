@@ -45,7 +45,9 @@ quanters_gate_3/
 │  │  └─ evaluation.py             # Rank IC 和因子分组收益
 │  └─ backtest/                    # 组合构建与执行收益
 │     ├─ portfolio.py              # 月度 Top N 组合回测
-│     └─ execution.py              # 次日开盘执行收益
+│     ├─ execution.py              # 固定周期次日开盘执行收益
+│     ├─ selection.py              # 组合权重校验与月度选股共用逻辑
+│     └─ continuous.py             # 连续持仓、现金、交易与日净值回测
 ├─ tests/                          # pytest 单元测试和回归测试
 ├─ data/                           # 本地输入、中间结果和报告
 └─ AGENTS.md                       # 交接给其他 AI 代理的开发文档
@@ -176,6 +178,21 @@ uv run python main.py --run-market-history --with-backtest
 uv run python main.py --run-market-history --with-execution-backtest
 ```
 
+运行下一交易日开盘调仓的连续净值研究回测：
+
+```powershell
+uv run python main.py --run-market-history --with-continuous-backtest
+```
+
+连续回测生成以下可审计产物：
+
+- `data/reports/continuous_backtest.csv`：逐交易日净值、收益、现金权重、换手、成本和异常状态。
+- `data/reports/continuous_backtest_trades.csv`：组合与等权股票池基准的逐笔模拟成交。
+- `data/reports/continuous_backtest_holdings.csv`：每次调仓后的实际持仓与目标权重。
+- `data/reports/continuous_backtest_summary.csv`：连续净值的累计收益、年化风险、回撤、成本和陈旧估值天数。
+
+该引擎在月末信号后的下一市场交易日开盘调仓，随后逐日估值到下一个调仓日；信号日失去指数资格不会删除已有持仓。研究净值使用前复权价格以保留公司行为后的可比收益，未复权执行口径仍由独立的 `--with-execution-backtest` 负责。不可交易持仓不会被强制卖出，不可交易的新标的不会被买入。若持仓当日整行行情缺失，估值会显式沿用最近收盘价并增加 `stale_holding_count`，不会把该价格写回或伪造成可交易行情。连续回测的 `turnover` 是当日买卖总金额除以交易前净值，因此完整换仓时可能接近 2；交易成本按买卖两侧实际金额分别扣除。
+
 也可以使用临时股票列表运行基础流程：
 
 ```powershell
@@ -213,14 +230,14 @@ Expand-Archive -LiteralPath data/snapshots/000300_ME_20210101_20260630_akshare_v
 ```powershell
 uv run python main.py --build-market-history
 uv run python main.py --build-execution-history
-uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest
+uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest --with-continuous-backtest
 ```
 
 ## 当前研究边界
 
-项目目前具备动态成员资格、行情清洗、八个基础价格-成交因子、横截面预处理、非重叠 Rank IC、年度稳定性、分组收益、因子诊断摘要、因子相关性诊断、Top N 组合和初步执行收益。首批因子覆盖短中期趋势、短期反转、波动、成交活跃度、流动性摩擦、成交活跃度变化和极端收益暴露；它们是可复现的研究基线，不应被预设为有效 alpha。财务数据层已具备 AKShare 财务摘要标准化与 point-in-time 合并：报告在其最晚报表更新时间当日之后才进入信号截面，后续批量缓存完成后可接入 ROE、ROA、营收增长和现金流质量因子。`--with-evaluation` 会额外生成 IC t 统计量、年度稳定性、分组单调性和因子两两横截面 Rank 相关性，用于人工判断因子方向、稳定性与重复暴露；这些诊断不会自动改变因子方向或组合权重。它仍未完整处理涨跌停、ST、退市、现金分红、最小委托数量、最低佣金、现金账户和真实成交，因此不能被描述为可直接实盘的系统。
+项目目前具备动态成员资格、行情清洗、八个基础价格-成交因子、横截面预处理、非重叠 Rank IC、年度稳定性、分组收益、因子诊断摘要、因子相关性诊断、Top N 组合、初步执行收益和连续持仓净值。首批因子覆盖短中期趋势、短期反转、波动、成交活跃度、流动性摩擦、成交活跃度变化和极端收益暴露；它们是可复现的研究基线，不应被预设为有效 alpha。财务数据层已具备 AKShare 财务摘要标准化与 point-in-time 合并：报告在其最晚报表更新时间当日之后才进入信号截面，后续批量缓存完成后可接入 ROE、ROA、营收增长和现金流质量因子。`--with-evaluation` 会额外生成 IC t 统计量、年度稳定性、分组单调性和因子两两横截面 Rank 相关性，用于人工判断因子方向、稳定性与重复暴露；这些诊断不会自动改变因子方向或组合权重。连续引擎已显式维护持仓和现金，但仍未完整处理涨跌停价格边界、ST、退市结算、现金分红、最小委托数量、最低佣金和真实成交，因此不能被描述为可直接实盘的系统。
 
-组合模块在每个月末独立观察固定 20 个可用交易日的未来收益。相邻月末之间并不总是恰好相隔 20 个交易日，因此这些观察窗口可能重叠，也可能留有空档。当前摘要中的复利、年化收益和回撤只能作为研究诊断指标，不能解释为严格自融资组合的真实净值。用于模拟盘或实盘前，必须改为按相邻调仓日估值的连续持仓回测。
+旧的组合诊断模块在每个月末独立观察固定 20 个可用交易日的未来收益。相邻月末之间并不总是恰好相隔 20 个交易日，因此 `portfolio_backtest_*` 和 `execution_backtest_*` 摘要中的复利、年化收益和回撤不能解释为严格自融资组合的真实净值。新增的 `continuous_backtest*` 报告按相邻调仓日连续持仓和逐日估值，应作为后续策略净值研究的默认依据；它仍是前复权研究口径，不替代真实撮合与券商账户验证。
 
 ## Git 协作
 

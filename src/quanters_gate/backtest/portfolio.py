@@ -5,6 +5,11 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+from quanters_gate.backtest.selection import (
+    add_composite_score,
+    monthly_signal_dates,
+    normalize_active_factor_weights,
+)
 from quanters_gate.data.dates import normalize_required_trade_dates
 from quanters_gate.data.universe import normalize_symbol_values, select_eligible_signals
 from quanters_gate.validation import (
@@ -36,26 +41,10 @@ def _validate_backtest_input(
 ) -> tuple[str, dict[str, float]]:
     require_positive(horizon, "未来收益周期")
     require_positive(top_n, "组合持仓数量")
-    if not factor_weights:
-        raise ValueError("组合因子权重不能为空。")
-    try:
-        weights = {factor: float(weight) for factor, weight in factor_weights.items()}
-    except TypeError, ValueError:
-        raise ValueError("组合因子权重必须是有限数值。") from None
-    if any(not np.isfinite(weight) for weight in weights.values()):
-        raise ValueError("组合因子权重必须是有限数值。")
-    active_weights = {factor: weight for factor, weight in weights.items() if weight != 0}
-    if not active_weights:
-        raise ValueError("组合因子权重不能全部为零。")
-
     target = return_column or f"forward_return_{horizon}d"
-    require_columns(data, ("date", "symbol", target, *active_weights), "组合回测输入")
+    active_weights = normalize_active_factor_weights(data, factor_weights, "组合回测输入")
+    require_columns(data, (target,), "组合回测输入")
     return target, active_weights
-
-
-def _monthly_signal_dates(data: pd.DataFrame) -> list[pd.Timestamp]:
-    dates = data["date"].dropna()
-    return dates.groupby(dates.dt.to_period("M")).max().tolist()
 
 
 def _turnover(previous_holdings: set[str], holdings: set[str]) -> float:
@@ -110,7 +99,7 @@ def run_monthly_top_n_backtest(
     records: list[dict[str, object]] = []
     previous_holdings: set[str] = set()
     required_values = [*weights, target]
-    for date in _monthly_signal_dates(result):
+    for date in monthly_signal_dates(result):
         cross_section = date_groups[pd.Timestamp(date)]
         if "is_tradable" in cross_section.columns:
             cross_section = cross_section.loc[cross_section["is_tradable"]]
@@ -118,9 +107,7 @@ def run_monthly_top_n_backtest(
         if usable.empty:
             continue
 
-        usable["composite_score"] = sum(
-            usable[column] * weight for column, weight in weights.items()
-        )
+        usable = add_composite_score(usable, weights)
         holdings_frame = usable.sort_values(
             ["composite_score", "symbol"],
             ascending=[False, True],

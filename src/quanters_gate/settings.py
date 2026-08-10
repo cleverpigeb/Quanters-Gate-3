@@ -71,6 +71,7 @@ class RunConfig:
     with_evaluation: bool
     with_backtest: bool
     with_execution_backtest: bool
+    with_continuous_backtest: bool
     research: ResearchConfig
     universe: UniverseConfig
     data: DataConfig
@@ -346,6 +347,7 @@ def serialize_run_config(config: RunConfig) -> str:
             f"with_evaluation = {str(config.with_evaluation).lower()}",
             f"with_backtest = {str(config.with_backtest).lower()}",
             f"with_execution_backtest = {str(config.with_execution_backtest).lower()}",
+            f"with_continuous_backtest = {str(config.with_continuous_backtest).lower()}",
             "",
             "[research]",
             f"start_date = {config.research.start_date}",

@@ -40,6 +40,7 @@ def test_command_defaults_come_from_toml_config() -> None:
     assert args.max_universe_snapshots == PROJECT_CONFIG.universe.snapshot_batch_size
     assert args.max_market_symbols == PROJECT_CONFIG.universe.market_fetch_batch_size
     assert args.max_fundamental_symbols == PROJECT_CONFIG.universe.market_fetch_batch_size
+    assert args.with_continuous_backtest is False
 
 
 def test_provider_factory_uses_the_configured_provider_registry() -> None:

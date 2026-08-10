@@ -68,6 +68,7 @@ def test_resolved_run_config_records_cli_overrides(
         with_evaluation=False,
         with_backtest=False,
         with_execution_backtest=False,
+        with_continuous_backtest=False,
     )
 
     config = workflows._resolve_run_config(args, ["000300", "600519", "000300"])
@@ -120,6 +121,7 @@ def test_historical_pipeline_filters_signals_after_full_history_calculation(
         with_evaluation=False,
         with_backtest=False,
         with_execution_backtest=False,
+        with_continuous_backtest=False,
     )
     captured: dict[str, pd.DataFrame] = {}
     original_preprocess = workflows.preprocess_factors
@@ -238,6 +240,7 @@ def test_execute_rejects_overlapping_cli_horizon_before_running_pipeline() -> No
         with_evaluation=False,
         with_backtest=False,
         with_execution_backtest=False,
+        with_continuous_backtest=False,
     )
 
     with pytest.raises(ValueError, match="窗口会重叠"):

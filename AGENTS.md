@@ -32,6 +32,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `research/evaluation.py`: Non-overlapping Rank IC, yearly stability summaries, quantile returns, Top-Bottom spreads, factor diagnostic summaries, and pairwise factor rank correlations.
 - `backtest/portfolio.py`: Monthly Top N portfolios, turnover, costs, and backtest summaries.
 - `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
+- `backtest/selection.py`: Shared factor-weight validation, monthly signal dates, and composite scores.
+- `backtest/continuous.py`: Next-open rebalancing, persistent positions, cash, daily NAV, trades, and rebalance holdings.
 
 ## Quantitative Constraints That Must Not Be Violated
 
@@ -46,6 +48,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 9. A factor must remain missing when its complete lookback window is unavailable.
 10. Positive returns alone do not establish strategy validity; drawdown, turnover, costs, and out-of-sample stability must also be reviewed.
 11. Monthly fixed-horizon return windows may overlap or leave gaps because adjacent month ends are not always exactly 20 trading days apart. Current compounded backtest summaries are research diagnostics, not a strict self-financing NAV, and must not be presented as realizable performance.
+12. Continuous research NAV must trade only after the signal date, retain positions across index removal, deduct costs on both buys and sells, and expose blocked trades and stale valuations instead of silently dropping them.
+13. A missing held-security bar may use the last observed close only as an explicit valuation mark with a nonzero stale counter. It must never create a tradable row, alter source data, or permit a simulated trade.
 
 ## Engineering Constraints
 
@@ -96,12 +100,14 @@ The membership history, per-security caches, and merged panels remain valid froz
 
 Financial history is not part of the frozen v1 snapshot. `--build-fundamental-history` fetches AKShare financial abstracts and three statement update dates sequentially into `data/fundamentals/raw/by_symbol/`, with a SHA-256 metadata file per security. It must be rerun until all historical universe symbols are cached. The processed panel uses the latest report whose conservative availability date is strictly before a signal date; it must never treat a report-period end date or same-day disclosure as tradable information. Only after a complete processed panel exists may historical research attach the four financial candidates.
 
+The continuous backtest is a current-code derived artifact and is not part of frozen snapshot v1. It uses forward-adjusted research opens and closes for comparable returns, executes each month-end signal at the next market open, maintains explicit cash and abstract shares, and compares the portfolio with a separately rebalanced equal-weight eligible-universe account. Its stable report interfaces are `continuous_backtest.csv`, `continuous_backtest_trades.csv`, `continuous_backtest_holdings.csv`, and `continuous_backtest_summary.csv`. Turnover is gross buy-plus-sell value divided by pre-trade NAV and may approach 2 on a full replacement. Do not reinterpret this research engine as raw-price broker execution.
+
 AKShare's constituent interface still provides only a current snapshot and cannot reconstruct monthly historical membership. Exact reproduction of all v1 artifacts requires the manifest's `project_commit`. With current code, starting from the audited membership file, use the following sequence and freeze the regenerated outputs under a new snapshot identifier after the code has been committed:
 
 ```powershell
 uv run python main.py --build-market-history
 uv run python main.py --build-execution-history
-uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest
+uv run python main.py --run-market-history --with-evaluation --with-backtest --with-execution-backtest --with-continuous-backtest
 ```
 
 When using a provider that supports historical constituent snapshots, run `--build-universe-history` first. Each history-build command must be rerun until all per-security caches are complete before generating reports or creating a new frozen snapshot.
