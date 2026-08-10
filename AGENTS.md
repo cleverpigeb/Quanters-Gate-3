@@ -34,6 +34,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - `backtest/execution.py`: Calendar-aligned next-open execution returns based on unadjusted prices and tradability.
 - `backtest/selection.py`: Shared factor-weight validation, monthly signal dates, and composite scores.
 - `backtest/continuous.py`: Next-open rebalancing, persistent positions, cash, daily NAV, trades, and rebalance holdings.
+- `trading/orders.py`: Target-weight order generation, directional trade constraints, lot rounding, cash scaling, and transaction-cost estimation.
 
 ## Quantitative Constraints That Must Not Be Violated
 
@@ -50,6 +51,8 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 11. Monthly fixed-horizon return windows may overlap or leave gaps because adjacent month ends are not always exactly 20 trading days apart. Current compounded backtest summaries are research diagnostics, not a strict self-financing NAV, and must not be presented as realizable performance.
 12. Continuous research NAV must trade only after the signal date, retain positions across index removal, deduct costs on both buys and sells, and expose blocked trades and stale valuations instead of silently dropping them.
 13. A missing held-security bar may use the last observed close only as an explicit valuation mark with a nonzero stale counter. It must never create a tradable row, alter source data, or permit a simulated trade.
+14. Historical limit-up, limit-down, ST, and delisting restrictions must come from point-in-time source fields. Current names, current classifications, or a guessed percentage move must never be backfilled as historical tradeability.
+15. Order generation must keep requested, filled, partial, and rejected states separate. A rejected sell leaves the position unchanged, and rejected sale proceeds must never finance buys.
 
 ## Engineering Constraints
 
@@ -60,6 +63,7 @@ The only entry point is the root-level `main.py`, which calls `quanters_gate.cli
 - Do not reintroduce the removed AkShare moving-average exercise or `matplotlib`. `akshare` is retained only as a provider dependency.
 - Data downloads must remain bounded, sequential, and resumable. Do not send aggressively concurrent requests to any provider.
 - Preserve the three bounded subpackages: `data` for acquisition and eligibility, `research` for factor analysis, and `backtest` for portfolio and execution logic. Cross-cutting infrastructure and application orchestration stay at the package root.
+- Keep reusable order construction and market-direction constraints in `trading`; backtests and future paper/live adapters must call that layer instead of implementing separate buy/sell and cash rules.
 - `data/cache.py` and `workflows.py` must depend on provider protocols, not on `LixingerClient`. The CLI is the composition root that selects the concrete provider implementation.
 - Low-level `data` modules must receive price conventions explicitly and must not import `PROJECT_CONFIG`.
 - Changes to quantitative logic must include minimal regression tests capable of exposing look-ahead bias, index-removal errors, and missing execution prices.
@@ -100,7 +104,7 @@ The membership history, per-security caches, and merged panels remain valid froz
 
 Financial history is not part of the frozen v1 snapshot. `--build-fundamental-history` fetches AKShare financial abstracts and three statement update dates sequentially into `data/fundamentals/raw/by_symbol/`, with a SHA-256 metadata file per security. It must be rerun until all historical universe symbols are cached. The processed panel uses the latest report whose conservative availability date is strictly before a signal date; it must never treat a report-period end date or same-day disclosure as tradable information. Only after a complete processed panel exists may historical research attach the four financial candidates.
 
-The continuous backtest is a current-code derived artifact and is not part of frozen snapshot v1. It uses forward-adjusted research opens and closes for comparable returns, executes each month-end signal at the next market open, maintains explicit cash and abstract shares, and compares the portfolio with a separately rebalanced equal-weight eligible-universe account. Its stable report interfaces are `continuous_backtest.csv`, `continuous_backtest_trades.csv`, `continuous_backtest_holdings.csv`, and `continuous_backtest_summary.csv`. Turnover is gross buy-plus-sell value divided by pre-trade NAV and may approach 2 on a full replacement. Do not reinterpret this research engine as raw-price broker execution.
+The continuous backtest is a current-code derived artifact and is not part of frozen snapshot v1. It uses forward-adjusted research opens and closes for comparable returns, executes each month-end signal at the next market open, maintains explicit cash and abstract shares, and compares the portfolio with a separately rebalanced equal-weight eligible-universe account. Its stable report interfaces are `continuous_backtest.csv`, `continuous_backtest_orders.csv`, `continuous_backtest_trades.csv`, `continuous_backtest_holdings.csv`, and `continuous_backtest_summary.csv`. Turnover is gross buy-plus-sell value divided by pre-trade NAV and may approach 2 on a full replacement. `orders.py` supports explicit `can_buy` and `can_sell` flags plus stable rejection reasons; absent reliable historical fields, only suspension and cash constraints are active in the shared run. Do not reinterpret this research engine as raw-price broker execution.
 
 AKShare's constituent interface still provides only a current snapshot and cannot reconstruct monthly historical membership. Exact reproduction of all v1 artifacts requires the manifest's `project_commit`. With current code, starting from the audited membership file, use the following sequence and freeze the regenerated outputs under a new snapshot identifier after the code has been committed:
 

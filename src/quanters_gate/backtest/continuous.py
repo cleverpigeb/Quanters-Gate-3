@@ -13,6 +13,11 @@ from quanters_gate.backtest.selection import (
 )
 from quanters_gate.data.dates import normalize_required_trade_dates
 from quanters_gate.data.universe import normalize_symbol_values, select_eligible_signals
+from quanters_gate.trading.orders import (
+    ORDER_COLUMNS,
+    TradingCostModel,
+    generate_rebalance_orders,
+)
 from quanters_gate.validation import (
     normalize_boolean_values,
     require_columns,
@@ -69,6 +74,7 @@ HOLDING_COLUMNS = [
 @dataclass(frozen=True)
 class ContinuousBacktestResult:
     daily: pd.DataFrame
+    orders: pd.DataFrame
     trades: pd.DataFrame
     holdings: pd.DataFrame
 
@@ -193,129 +199,58 @@ def _mark_positions(
     return state.cash + sum(market_values.values()), market_values, stale_count
 
 
-def _record_trade(
-    records: list[dict[str, object]],
-    account: str,
-    date: pd.Timestamp,
-    signal_date: pd.Timestamp,
-    symbol: str,
-    side: str,
-    price: float,
-    shares: float,
-    cost_rate: float,
-) -> float:
-    gross_value = shares * price
-    transaction_cost = gross_value * cost_rate
-    records.append(
-        {
-            "account": account,
-            "date": date,
-            "signal_date": signal_date,
-            "symbol": symbol,
-            "side": side,
-            "price": price,
-            "shares": shares,
-            "gross_value": gross_value,
-            "transaction_cost": transaction_cost,
-        }
-    )
-    return transaction_cost
-
-
 def _rebalance_account(
     account: str,
     state: _AccountState,
     targets: tuple[str, ...],
     day_bars: pd.DataFrame,
-    open_values: dict[str, float],
     pretrade_nav: float,
     cost_rate: float,
     date: pd.Timestamp,
     signal_date: pd.Timestamp,
+    order_records: list[dict[str, object]],
     trade_records: list[dict[str, object]],
 ) -> _RebalanceResult:
-    target_set = set(targets)
-    target_value = pretrade_nav / len(targets) if targets else 0.0
-    planned_sells: dict[str, float] = {}
-    planned_buys: dict[str, float] = {}
-    blocked_buy_count = 0
-    blocked_sell_count = 0
-
-    for symbol in set(state.shares) | target_set:
-        current_value = open_values.get(symbol, 0.0)
-        desired_value = target_value if symbol in target_set else 0.0
-        is_tradable = symbol in day_bars.index and bool(day_bars.at[symbol, "is_tradable"])
-        difference = desired_value - current_value
-        if not is_tradable:
-            if difference > 1e-12:
-                blocked_buy_count += 1
-            elif difference < -1e-12:
-                blocked_sell_count += 1
-            continue
-        if difference > 1e-12:
-            planned_buys[symbol] = difference
-        elif difference < -1e-12:
-            planned_sells[symbol] = -difference
-
-    gross_traded_value = 0.0
-    transaction_cost = 0.0
-    for symbol in sorted(planned_sells):
-        price = float(day_bars.at[symbol, "open"])
-        shares = min(planned_sells[symbol] / price, state.shares[symbol])
-        gross_value = shares * price
-        cost = _record_trade(
-            trade_records,
-            account,
-            date,
-            signal_date,
-            symbol,
-            "sell",
-            price,
-            shares,
-            cost_rate,
-        )
-        state.cash += gross_value - cost
-        remaining = state.shares[symbol] - shares
-        if remaining <= 1e-12:
-            state.shares.pop(symbol)
-        else:
-            state.shares[symbol] = remaining
-        gross_traded_value += gross_value
-        transaction_cost += cost
-
-    planned_buy_value = sum(planned_buys.values())
-    buy_scale = 0.0
-    if planned_buy_value > 0:
-        buy_scale = min(1.0, state.cash / (planned_buy_value * (1 + cost_rate)))
-    for symbol in sorted(planned_buys):
-        gross_value = planned_buys[symbol] * buy_scale
-        if gross_value <= 1e-12:
-            continue
-        price = float(day_bars.at[symbol, "open"])
-        shares = gross_value / price
-        cost = _record_trade(
-            trade_records,
-            account,
-            date,
-            signal_date,
-            symbol,
-            "buy",
-            price,
-            shares,
-            cost_rate,
-        )
-        state.cash -= gross_value + cost
-        state.shares[symbol] = state.shares.get(symbol, 0.0) + shares
-        gross_traded_value += gross_value
-        transaction_cost += cost
-
-    if abs(state.cash) < 1e-12:
-        state.cash = 0.0
+    quote_columns = ["symbol", "open", "is_tradable"]
+    for column in ("can_buy", "can_sell", "buy_block_reason", "sell_block_reason"):
+        if column in day_bars.columns:
+            quote_columns.append(column)
+    quotes = day_bars[quote_columns].rename(columns={"open": "price"})
+    target_weights = {symbol: 1 / len(targets) for symbol in targets} if targets else {}
+    result = generate_rebalance_orders(
+        current_shares=state.shares,
+        target_weights=target_weights,
+        quotes=quotes,
+        portfolio_value=pretrade_nav,
+        cash=state.cash,
+        cost_model=TradingCostModel(commission_rate=cost_rate),
+        account=account,
+        date=date,
+        signal_date=signal_date,
+    )
+    state.cash = result.resulting_cash
+    state.shares = result.resulting_shares
+    order_records.extend(result.orders.to_dict("records"))
+    fills = result.orders.loc[result.orders["filled_shares"].gt(0)]
+    trade_records.extend(
+        {
+            "account": row.account,
+            "date": row.date,
+            "signal_date": row.signal_date,
+            "symbol": row.symbol,
+            "side": row.side,
+            "price": row.estimated_price,
+            "shares": row.filled_shares,
+            "gross_value": row.gross_value,
+            "transaction_cost": row.transaction_cost,
+        }
+        for row in fills.itertuples(index=False)
+    )
     return _RebalanceResult(
-        turnover=gross_traded_value / pretrade_nav if pretrade_nav > 0 else 0.0,
-        transaction_cost=transaction_cost,
-        blocked_buy_count=blocked_buy_count,
-        blocked_sell_count=blocked_sell_count,
+        turnover=result.gross_traded_value / pretrade_nav if pretrade_nav > 0 else 0.0,
+        transaction_cost=result.transaction_cost,
+        blocked_buy_count=result.blocked_buy_count,
+        blocked_sell_count=result.blocked_sell_count,
     )
 
 
@@ -375,6 +310,7 @@ def run_continuous_top_n_backtest(
     if not schedule:
         return ContinuousBacktestResult(
             daily=pd.DataFrame(columns=CONTINUOUS_BACKTEST_COLUMNS),
+            orders=pd.DataFrame(columns=ORDER_COLUMNS),
             trades=pd.DataFrame(columns=TRADE_COLUMNS),
             holdings=pd.DataFrame(columns=HOLDING_COLUMNS),
         )
@@ -393,18 +329,15 @@ def run_continuous_top_n_backtest(
     previous_portfolio_nav = 1.0
     previous_benchmark_nav = 1.0
     daily_records: list[dict[str, object]] = []
+    order_records: list[dict[str, object]] = []
     trade_records: list[dict[str, object]] = []
     holding_records: list[dict[str, object]] = []
 
     for date in calendar:
         date = pd.Timestamp(date)
         day_bars = bar_groups[date]
-        portfolio_open_nav, portfolio_open_values, _ = _mark_positions(
-            portfolio_state, day_bars, "open"
-        )
-        benchmark_open_nav, benchmark_open_values, _ = _mark_positions(
-            benchmark_state, day_bars, "open"
-        )
+        portfolio_open_nav, _, _ = _mark_positions(portfolio_state, day_bars, "open")
+        benchmark_open_nav, _, _ = _mark_positions(benchmark_state, day_bars, "open")
         signal_date = pd.NaT
         portfolio_rebalance = _RebalanceResult(0.0, 0.0, 0, 0)
         if date in schedule:
@@ -414,11 +347,11 @@ def run_continuous_top_n_backtest(
                 portfolio_state,
                 portfolio_targets,
                 day_bars,
-                portfolio_open_values,
                 portfolio_open_nav,
                 one_way_cost_rate,
                 date,
                 signal_date,
+                order_records,
                 trade_records,
             )
             _rebalance_account(
@@ -426,11 +359,11 @@ def run_continuous_top_n_backtest(
                 benchmark_state,
                 benchmark_targets,
                 day_bars,
-                benchmark_open_values,
                 benchmark_open_nav,
                 one_way_cost_rate,
                 date,
                 signal_date,
+                order_records,
                 trade_records,
             )
             _record_holdings(
@@ -484,6 +417,7 @@ def run_continuous_top_n_backtest(
 
     return ContinuousBacktestResult(
         daily=pd.DataFrame(daily_records, columns=CONTINUOUS_BACKTEST_COLUMNS),
+        orders=pd.DataFrame(order_records, columns=ORDER_COLUMNS),
         trades=pd.DataFrame(trade_records, columns=TRADE_COLUMNS),
         holdings=pd.DataFrame(holding_records, columns=HOLDING_COLUMNS),
     )

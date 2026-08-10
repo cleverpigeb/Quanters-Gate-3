@@ -490,6 +490,7 @@ def _run_continuous_backtest(
         portfolio.one_way_cost_rate,
     )
     _write_csv(result.daily, REPORT_DIR / "continuous_backtest.csv")
+    _write_csv(result.orders, REPORT_DIR / "continuous_backtest_orders.csv")
     _write_csv(result.trades, REPORT_DIR / "continuous_backtest_trades.csv")
     _write_csv(result.holdings, REPORT_DIR / "continuous_backtest_holdings.csv")
     summary = summarize_continuous_backtest(result.daily)

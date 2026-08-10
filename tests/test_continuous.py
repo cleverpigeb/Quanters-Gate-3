@@ -124,6 +124,15 @@ def test_continuous_backtest_freezes_an_untradable_holding() -> None:
     ]
     assert portfolio_holdings["symbol"].tolist() == ["000001"]
     assert portfolio_holdings["is_selected"].tolist() == [False]
+    rejected = result.orders.loc[
+        result.orders["account"].eq("portfolio")
+        & result.orders["date"].eq(pd.Timestamp("2024-03-01"))
+        & result.orders["status"].eq("rejected")
+    ]
+    assert set(rejected["reject_reason"]) == {
+        "suspended_or_no_trade",
+        "below_lot_or_insufficient_cash",
+    }
 
 
 def test_continuous_backtest_keeps_a_removed_stock_until_the_next_trade_date() -> None:
